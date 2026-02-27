@@ -25,6 +25,26 @@ function GlobalUiEffects() {
   const location = useLocation();
 
   useEffect(() => {
+    const isDashboardRoute = location.pathname === '/dashboard' || location.pathname === '/admin/dashboard';
+    if (!isDashboardRoute) return;
+
+    const onUnhandledRejection = (event) => {
+      const reason = event?.reason;
+      const message = typeof reason === 'string' ? reason : reason?.message;
+
+      if (
+        typeof message === 'string' &&
+        message.includes('A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received')
+      ) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    return () => window.removeEventListener('unhandledrejection', onUnhandledRejection);
+  }, [location.pathname]);
+
+  useEffect(() => {
     const bindMedia = (node) => {
       if (!(node instanceof HTMLElement)) return;
       if (!node.matches('img, video, iframe')) return;
