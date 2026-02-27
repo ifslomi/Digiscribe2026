@@ -331,3 +331,50 @@ export async function existsOnFtp(remotePath) {
     client.close();
   }
 }
+
+/**
+ * Recursively list directories and files under FTP_BASE (or a subpath).
+ *
+ * @param {string} [remoteStartPath=''] - Path relative to FTP_BASE to start from
+ * @returns {Promise<{ directories: Array<{ path: string }>, files: Array<{ path: string, size: number, modifiedAt: Date|null }> }>} 
+ */
+export async function listTreeOnFtp(remoteStartPath = '') {
+  const client = await createClient();
+  try {
+    const normalize = (p) => String(p || '').replace(/^\/+|\/+$/g, '');
+    const startRel = normalize(remoteStartPath);
+    const startFull = startRel ? `${FTP_BASE}/${startRel}` : FTP_BASE;
+
+    const directories = [];
+    const files = [];
+    const queue = [{ full: startFull, rel: startRel }];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      const entries = await client.list(current.full);
+
+      for (const entry of entries) {
+        if (!entry || !entry.name || entry.name === '.' || entry.name === '..') continue;
+        const relPath = current.rel ? `${current.rel}/${entry.name}` : entry.name;
+
+        if (entry.isDirectory) {
+          directories.push({ path: relPath });
+          queue.push({ full: `${current.full}/${entry.name}`, rel: relPath });
+          continue;
+        }
+
+        if (entry.isFile) {
+          files.push({
+            path: relPath,
+            size: Number(entry.size) || 0,
+            modifiedAt: entry.modifiedAt instanceof Date ? entry.modifiedAt : null,
+          });
+        }
+      }
+    }
+
+    return { directories, files };
+  } finally {
+    client.close();
+  }
+}
