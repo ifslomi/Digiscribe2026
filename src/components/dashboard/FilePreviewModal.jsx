@@ -33,6 +33,7 @@ function isEmbeddableUrl(url) {
     'vimeo.com',
     'dailymotion.com', 'dai.ly',
     'tiktok.com',
+    'facebook.com', 'fb.watch',
     'streamable.com',
     'drive.google.com',
   ];
@@ -59,6 +60,23 @@ function getDailymotionEmbedUrl(url) {
 function getTikTokEmbedUrl(url) {
   const match = url.match(/tiktok\.com\/@[^/]+\/video\/(\d+)/);
   return match ? `https://www.tiktok.com/embed/v2/${match[1]}` : null;
+}
+
+function getFacebookEmbedUrl(url) {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    const href = encodeURIComponent(url);
+    const pathname = parsed.pathname || '';
+
+    if (/\/posts\//i.test(pathname) || /\/permalink\//i.test(pathname)) {
+      return `https://www.facebook.com/plugins/post.php?href=${href}&show_text=true&width=560`;
+    }
+
+    return `https://www.facebook.com/plugins/video.php?href=${href}&show_text=false&width=560`;
+  } catch {
+    return null;
+  }
 }
 
 function formatSize(bytes) {
@@ -151,6 +169,11 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
       return { type: 'tiktok', embedUrl: tiktokUrl };
     }
 
+    const facebookUrl = getFacebookEmbedUrl(sourceUrl);
+    if (facebookUrl) {
+      return { type: 'facebook', embedUrl: facebookUrl };
+    }
+
     // Dailymotion/Facebook embeds are intentionally opened externally to avoid
     // browser policy and monetization/player-id warnings in iframe previews.
 
@@ -186,8 +209,14 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
             className="w-full max-w-3xl aspect-video rounded-lg shadow-sm"
             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
             allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
             title={file.originalName}
           />
+          {['dailymotion', 'tiktok', 'facebook'].includes(embedInfo.type) && (
+            <p className="text-[11px] text-gray-400 text-center max-w-2xl">
+              Some platforms may log third-party player warnings in DevTools. If playback is blocked, use the direct source link.
+            </p>
+          )}
           <a
             href={sourceUrl}
             target="_blank"
