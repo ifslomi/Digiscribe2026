@@ -122,7 +122,7 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
       .finally(() => setTextLoading(false));
   }, [mediaType, file.url]);
 
-  const sourceUrl = file.sourceReferenceUrl || file.sourceUrl || file.url;
+  const sourceUrl = file.sourceUrl || file.sourceReferenceUrl || file.url;
   const isUrlUpload = file.sourceType === 'url';
 
   // Determine embed strategy for URL uploads

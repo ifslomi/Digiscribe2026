@@ -497,11 +497,24 @@ app.post('/api/upload/url', verifyAuth, async (req, res) => {
         contentType = fetched.contentType;
         originalName = fetched.originalName;
       } catch (directErr) {
-        if (directErr.code === 'HTML_RESPONSE') {
-          const displayName = customName?.trim() || path.basename(new URL(url).pathname) || url;
-          return saveAsUrlLinkEntry(displayName, 'Saved as source link reference — direct download unavailable.');
+        let displayName = customName?.trim();
+        if (!displayName) {
+          try {
+            displayName = path.basename(new URL(url).pathname) || url;
+          } catch {
+            displayName = url;
+          }
         }
-        throw directErr;
+
+        const isHtmlLikeError = directErr?.code === 'HTML_RESPONSE'
+          || /html page instead of a media file/i.test(String(directErr?.message || ''));
+
+        const fallbackMessage = isHtmlLikeError
+          ? 'Saved as source link reference — direct media download unavailable for this URL.'
+          : `Saved as source link reference — direct download failed (${directErr?.message || 'unknown error'}).`;
+
+        console.warn('[upload/url] direct fetch failed, saving source reference:', directErr?.message || directErr);
+        return saveAsUrlLinkEntry(displayName, fallbackMessage);
       }
     }
 

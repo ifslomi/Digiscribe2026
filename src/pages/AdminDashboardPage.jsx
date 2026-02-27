@@ -1217,7 +1217,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
 
     const file = contextMenu.file;
     const isUrl = file.sourceType === 'url';
-    const sourceHref = file.sourceReferenceUrl || file.sourceUrl || (isUrl ? file.url : '');
+    const sourceHref = file.sourceUrl || file.sourceReferenceUrl || (isUrl ? file.url : '');
     const items = [];
 
     const selCount = [...selectedIds].filter((id) => filteredIds.has(id)).length;
