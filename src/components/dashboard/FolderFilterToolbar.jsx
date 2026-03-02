@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import DateRangePicker from './DateRangePicker';
 
@@ -49,7 +49,7 @@ export function ServicePicker({ value = [], onChange }) {
 
   const [open, setOpen] = useState(false);
   const [activeKey, setActiveKey] = useState(() => visibleTree[0]?.key || '');
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState(null);
   const triggerRef = useRef(null);
   const panelRef = useRef(null);
 
@@ -62,7 +62,11 @@ export function ServicePicker({ value = [], onChange }) {
     setPos({ top: rect.bottom + 6, left });
   }, []);
 
-  useEffect(() => { if (open) updatePos(); }, [open, updatePos]);
+  // Position before first paint when opened to avoid top-left flash.
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    updatePos();
+  }, [open, updatePos]);
 
   useEffect(() => {
     if (!open) return;
@@ -144,7 +148,7 @@ export function ServicePicker({ value = [], onChange }) {
 
   if (visibleTree.length === 0) return null;
 
-  const panel = open ? createPortal(
+  const panel = open && pos ? createPortal(
     <div
       ref={panelRef}
       style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999, width: 480 }}
@@ -262,7 +266,10 @@ export function ServicePicker({ value = [], onChange }) {
       <button
         ref={triggerRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          if (!open) updatePos();
+          setOpen((o) => !o);
+        }}
         className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all whitespace-nowrap ${
           isActive
             ? 'bg-primary/5 border-primary/30 text-primary'
