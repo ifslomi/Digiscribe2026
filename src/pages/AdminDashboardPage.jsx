@@ -247,6 +247,14 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   const [removeTranscriptionConfirm, setRemoveTranscriptionConfirm] = useState(null);
   const [renameModal, setRenameModal] = useState(null);
 
+  // Change-status popup state
+  const [statusChangeTarget, setStatusChangeTarget] = useState(null);
+
+  // "Use as Transcription for..." modal state
+  const [attachAsTranscriptionSource, setAttachAsTranscriptionSource] = useState(null);
+  const [attachAsTranscriptionLoading, setAttachAsTranscriptionLoading] = useState(false);
+  const [attachTargetSearch, setAttachTargetSearch] = useState('');
+
   useEffect(() => {
     if (!message) return;
     if (message.type === 'success') {
@@ -802,6 +810,38 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
       setTranscriptionRemoving(false);
       setRemoveTranscriptionConfirm(null);
       setTimeout(() => setMessage(null), 3000);
+    }
+  }, [getIdToken]);
+
+  // Attach an already-uploaded file as the transcription for another file
+  const handleAttachFromExistingFile = useCallback(async (sourceFile, targetFile) => {
+    setAttachAsTranscriptionLoading(true);
+    setMessage(null);
+    try {
+      const token = await getIdToken();
+      const downloadRes = await fetch(fileDownloadUrl(sourceFile.url), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!downloadRes.ok) throw new Error('Failed to fetch source file.');
+      const blob = await downloadRes.blob();
+      const file = new File([blob], sourceFile.originalName || 'transcription', { type: blob.type });
+      const formData = new FormData();
+      formData.append('transcription', file);
+      const res = await fetch(`/api/files/metadata/${targetFile.id}/transcription`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to attach transcription.');
+      setMessage({ type: 'success', text: `Transcription attached to "${targetFile.originalName}" successfully.` });
+      setAttachAsTranscriptionSource(null);
+      setAttachTargetSearch('');
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setAttachAsTranscriptionLoading(false);
+      setTimeout(() => setMessage(null), 4000);
     }
   }, [getIdToken]);
 
@@ -1445,6 +1485,10 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
         label: file.transcriptionUrl ? 'Manage Transcription' : 'Attach Transcription',
         onClick: () => setTranscriptionTarget(file),
       });
+      items.push({ icon: 'fa-sliders-h', label: 'Change Status', onClick: () => { setStatusChangeTarget(file); setContextMenu(null); } });
+      if (!isUrl) {
+        items.push({ icon: 'fa-file-import', label: 'Use as Transcription for...', onClick: () => { setAttachAsTranscriptionSource(file); setAttachTargetSearch(''); setContextMenu(null); } });
+      }
       items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
       items.push({ divider: true });
       items.push({ icon: 'fa-info-circle', label: 'Properties', onClick: () => setPropertiesFile(file) });
@@ -1454,6 +1498,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     if (selCount > 1) {
       items.push({ icon: 'fa-download', label: `Download ${selCount} Selected as ZIP`, onClick: () => handleBulkDownload() });
       items.push({ divider: true });
+      items.push({ icon: 'fa-sliders-h', label: `Change Status of ${selCount} Selected`, onClick: () => { setStatusChangeTarget({ bulkMode: true, count: selCount }); setContextMenu(null); } });
       items.push({ icon: 'fa-arrows-alt', label: 'Move Selected', onClick: () => setBulkMoveActive(true) });
       items.push({ icon: 'fa-times-circle', label: 'Deselect All', onClick: () => setSelectedIds(new Set()) });
       items.push({ icon: 'fa-trash-alt', label: 'Delete Selected', danger: true, onClick: () => setBulkDeleteConfirm(true) });
@@ -1825,35 +1870,6 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               <i className="fas fa-folder-open text-[10px]"></i>
               Move to Folder
             </Button>
-            {selectedFileCount > 0 && bulkStatusTarget ? (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-gray-500 font-medium">Set status:</span>
-                {STATUS_OPTIONS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => handleBulkStatus(s)}
-                    disabled={bulkLoading}
-                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].text} border ${STATUS_CONFIG[s].border}`}
-                  >
-                    {s === 'pending' ? 'Pending' : s === 'in-progress' ? 'In Progress' : 'Transcribed'}
-                  </button>
-                ))}
-                <button onClick={() => setBulkStatusTarget(null)} className="text-gray-400 hover:text-gray-600 px-1">
-                  <i className="fas fa-times text-xs"></i>
-                </button>
-              </div>
-            ) : selectedFileCount > 0 ? (
-              <Button
-                onClick={() => setBulkStatusTarget(true)}
-                disabled={bulkLoading}
-                variant="secondary"
-                size="sm"
-                className="text-sky-600 bg-sky-50 hover:bg-sky-100"
-              >
-                <i className="fas fa-exchange-alt text-[10px]"></i>
-                Change Status
-              </Button>
-            ) : null}
             <Button
               onClick={() => setBulkDeleteConfirm(true)}
               variant="ghost"
@@ -2870,6 +2886,180 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
         }}
         onClose={() => setRenameModal(null)}
       />
+
+      {/* Change Status Modal */}
+      {statusChangeTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setStatusChangeTarget(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-dark-text">Change Status</h3>
+                <p className="text-xs text-gray-text mt-0.5 truncate max-w-[240px]">
+                  {statusChangeTarget.bulkMode
+                    ? `${statusChangeTarget.count} files selected`
+                    : statusChangeTarget.originalName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStatusChangeTarget(null)}
+                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 ml-3"
+              >
+                <i className="fas fa-times text-sm"></i>
+              </button>
+            </div>
+            <div className="p-5 space-y-2">
+              {STATUS_OPTIONS.map((s) => {
+                const scfg = STATUS_CONFIG[s];
+                const isActive = !statusChangeTarget.bulkMode && (statusChangeTarget.status || 'pending') === s;
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={statusLoading === statusChangeTarget.id || bulkLoading}
+                    onClick={async () => {
+                      if (statusChangeTarget.bulkMode) {
+                        await handleBulkStatus(s);
+                      } else {
+                        await handleStatusChange(statusChangeTarget.id, s);
+                      }
+                      setStatusChangeTarget(null);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      isActive
+                        ? `${scfg.bg} ${scfg.border} ${scfg.text}`
+                        : 'border-gray-100 hover:bg-gray-50 text-dark-text'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isActive ? scfg.iconBg : 'bg-gray-100'}`}>
+                      {(statusLoading === statusChangeTarget.id || bulkLoading) && isActive
+                        ? <i className="fas fa-spinner fa-spin text-xs text-gray-400"></i>
+                        : <i className={`fas ${scfg.icon} text-xs ${isActive ? scfg.text : 'text-gray-400'}`}></i>
+                      }
+                    </div>
+                    <span className="text-sm font-medium flex-1 text-left">{scfg.label}</span>
+                    {isActive && statusLoading !== statusChangeTarget.id && !bulkLoading && (
+                      <i className="fas fa-check text-xs"></i>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setStatusChangeTarget(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-dark-text hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Use as Transcription For... Modal */}
+      {attachAsTranscriptionSource && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => !attachAsTranscriptionLoading && setAttachAsTranscriptionSource(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden"
+            style={{ maxHeight: '80vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-dark-text">Use as Transcription for...</h3>
+                <p className="text-xs text-gray-text mt-0.5 truncate max-w-[320px]" title={attachAsTranscriptionSource.originalName}>
+                  Attaching: <span className="font-medium text-dark-text">{attachAsTranscriptionSource.originalName}</span>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !attachAsTranscriptionLoading && setAttachAsTranscriptionSource(null)}
+                className="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0 ml-3"
+              >
+                <i className="fas fa-times text-sm"></i>
+              </button>
+            </div>
+            <div className="px-5 pt-4 pb-2 flex-shrink-0">
+              <div className="relative">
+                <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                <input
+                  type="text"
+                  placeholder="Search files by name or email..."
+                  value={attachTargetSearch}
+                  onChange={(e) => setAttachTargetSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-1.5 min-h-0">
+              {(() => {
+                const q = attachTargetSearch.toLowerCase().trim();
+                const candidates = allFiles.filter(
+                  (f) =>
+                    f.id !== attachAsTranscriptionSource.id &&
+                    (!q ||
+                      (f.originalName && f.originalName.toLowerCase().includes(q)) ||
+                      (f.uploadedByEmail && f.uploadedByEmail.toLowerCase().includes(q)))
+                );
+                if (candidates.length === 0) {
+                  return (
+                    <p className="text-center text-sm text-gray-text py-8">
+                      <i className="fas fa-search text-gray-300 block text-2xl mb-2"></i>
+                      No files found.
+                    </p>
+                  );
+                }
+                return candidates.map((f) => {
+                  const fcfg = STATUS_CONFIG[f.status] || STATUS_CONFIG.pending;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      disabled={attachAsTranscriptionLoading}
+                      onClick={() => handleAttachFromExistingFile(attachAsTranscriptionSource, f)}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border border-gray-100 hover:border-primary/30 hover:bg-primary/[0.02] transition-all disabled:opacity-50 disabled:cursor-not-allowed text-left group"
+                    >
+                      <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                        <i className={`fas ${getFileIcon(f.type)} text-xs text-gray-500`}></i>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-dark-text truncate">{f.originalName}</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{f.uploadedByEmail || '--'}</p>
+                      </div>
+                      <span className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium border ${fcfg.bg} ${fcfg.text} ${fcfg.border}`}>
+                        <i className={`fas ${fcfg.icon} text-[8px]`}></i>
+                        {fcfg.label}
+                      </span>
+                      {attachAsTranscriptionLoading ? (
+                        <i className="fas fa-spinner fa-spin text-primary text-xs flex-shrink-0"></i>
+                      ) : (
+                        <i className="fas fa-chevron-right text-gray-300 group-hover:text-primary text-xs flex-shrink-0 transition-colors"></i>
+                      )}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+            <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between flex-shrink-0">
+              <p className="text-xs text-gray-text">Click a file to attach the selected file as its transcription.</p>
+              <button
+                type="button"
+                onClick={() => !attachAsTranscriptionLoading && setAttachAsTranscriptionSource(null)}
+                disabled={attachAsTranscriptionLoading}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-dark-text hover:bg-gray-100 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Attach Transcription Modal */}
       {transcriptionTarget && (

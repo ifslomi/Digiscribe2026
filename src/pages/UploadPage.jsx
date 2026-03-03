@@ -357,6 +357,11 @@ export default function UploadPage() {
   const { getIdToken, role } = useAuth();
   const toast = useAppToast();
   const fileInputRef = useRef(null);
+  const abortControllerRef = useRef(null);
+
+  const handleCancelUpload = () => {
+    abortControllerRef.current?.abort();
+  };
 
   const handleBackNavigation = () => {
     if (window.history.length > 1) {
@@ -549,6 +554,8 @@ export default function UploadPage() {
   /*  UPLOAD LOGIC                                                     */
   /* ================================================================ */
   const handleUpload = async () => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setUploading(true);
     setResult(null);
     setProgress(0);
@@ -561,19 +568,27 @@ export default function UploadPage() {
       const authHeaders = { Authorization: `Bearer ${token}` };
 
       if (uploadMethod === 'file') {
-        await uploadFiles(authHeaders);
+        await uploadFiles(authHeaders, controller.signal);
       } else {
-        await uploadUrls(authHeaders);
+        await uploadUrls(authHeaders, controller.signal);
       }
     } catch (err) {
-      setResult({ type: 'error', message: err.message });
-      setCurrentStep(5);
+      if (err.name === 'AbortError' || err.message === '__CANCELLED__') {
+        setProgress(0);
+        setEta('');
+        setUrlProcessingIndex(-1);
+        // Stay on step 4 so the user can re-submit or go back
+      } else {
+        setResult({ type: 'error', message: err.message });
+        setCurrentStep(5);
+      }
     } finally {
       setUploading(false);
+      abortControllerRef.current = null;
     }
   };
 
-  const uploadFiles = async (authHeaders) => {
+  const uploadFiles = async (authHeaders, signal) => {
     const filesToUpload = [...files];
     const totalSize = filesToUpload.reduce((sum, f) => sum + f.size, 0);
     let uploadedBytes = 0;
@@ -607,6 +622,7 @@ export default function UploadPage() {
           method: 'POST',
           headers: authHeaders,
           body: formData,
+          signal,
         });
 
         if (chunkRes.ok) {
@@ -641,6 +657,7 @@ export default function UploadPage() {
             serviceCategory,
             folderId,
           }),
+          signal,
         });
 
         const completeData = await completeRes.json().catch(() => ({}));
@@ -712,7 +729,7 @@ export default function UploadPage() {
     setCurrentStep(5);
   };
 
-  const uploadUrls = async (authHeaders) => {
+  const uploadUrls = async (authHeaders, signal) => {
     const results = [];
     const errors = [];
 
@@ -725,6 +742,7 @@ export default function UploadPage() {
           method: 'POST',
           headers: { ...authHeaders, 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: urls[i], customName: urlNames[i] || '', description, serviceCategory, folderId }),
+          signal,
         });
         const raw = await res.text();
         let data = {};
@@ -745,6 +763,8 @@ export default function UploadPage() {
           results.push(data.file);
         }
       } catch (err) {
+        // Re-throw abort errors so the outer handler can clean up
+        if (err.name === 'AbortError') throw err;
         errors.push(`${urls[i]}: ${err.message}`);
       }
     }
@@ -1389,6 +1409,18 @@ export default function UploadPage() {
                 </div>
               </div>
             )}
+
+            {/* Cancel button */}
+            <div className="flex justify-center mt-5">
+              <button
+                type="button"
+                onClick={handleCancelUpload}
+                className="flex items-center gap-2 text-sm font-medium text-red-500 hover:text-red-600 border border-red-200 hover:border-red-300 hover:bg-red-50 px-5 py-2.5 rounded-xl transition-all duration-200"
+              >
+                <i className="fas fa-times text-xs"></i>
+                Cancel Upload
+              </button>
+            </div>
           </div>
         )}
 
