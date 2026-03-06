@@ -1835,10 +1835,19 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
       ))}
 
       {/* Breadcrumbs */}
-      <div className={`bg-white rounded-xl border px-4 py-3 mb-4 shadow-sm transition-all duration-200 ${
-        isDraggingAny ? 'border-dashed border-primary/50 bg-primary/[0.015] shadow-sm' : 'border-gray-100'
-      }`}>
-        {isDraggingAny && (
+      <div
+        className={`bg-white rounded-xl border px-4 py-3 mb-4 shadow-sm transition-all duration-200 ${
+          dragOverBreadcrumb === 'root'
+            ? 'border-primary/40 bg-primary/[0.02] shadow-md'
+            : isDraggingAny
+            ? 'border-dashed border-primary/50 bg-primary/[0.015] shadow-sm'
+            : 'border-gray-100'
+        }`}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setDragOverBreadcrumb(null);
+        }}
+      >
+        {isDraggingAny && dragOverBreadcrumb === null && (
           <div className="flex items-center gap-2 mb-2 px-0.5 animate-pulse">
             <span className="flex items-center justify-center w-5 h-5 rounded-md bg-primary/10 flex-shrink-0">
               <i className="fas fa-location-arrow text-primary text-[9px] -rotate-45"></i>
@@ -1847,6 +1856,12 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               Drag here to move to <span className="font-semibold">All Files</span> or a parent folder
             </p>
           </div>
+        )}
+        {dragOverBreadcrumb !== null && (
+          <p className="text-[10px] text-primary/70 font-medium mb-1.5 flex items-center gap-1">
+            <i className="fas fa-arrows-alt text-[9px]"></i>
+            Drop to move here
+          </p>
         )}
         <div className="flex items-center gap-1 text-sm overflow-x-auto">
           {/* Root view toggle: General / Per User */}
@@ -1875,10 +1890,19 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
           <button
             type="button"
             onClick={() => { setSelectedUserEmail(null); setCurrentFolderId(null); }}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${!selectedUserEmail && !currentFolderId ? 'text-primary font-semibold bg-primary/5' : 'text-gray-text hover:text-dark-text hover:bg-gray-50'}`}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; setDragOverBreadcrumb('root'); }}
+            onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverBreadcrumb(null); handleDrop(e, null); }}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${
+              dragOverBreadcrumb === 'root'
+                ? 'bg-primary/10 text-primary border border-primary/30 scale-105 shadow-sm'
+                : !selectedUserEmail && !currentFolderId
+                ? 'text-primary font-semibold bg-primary/5'
+                : 'text-gray-text hover:text-dark-text hover:bg-gray-50'
+            }`}
           >
             <i className={`fas ${rootViewMode === 'general' && !selectedUserEmail ? 'fa-layer-group' : 'fa-users'} text-xs`}></i>
             {rootViewMode === 'general' && !selectedUserEmail ? 'All Files' : 'All Users'}
+            {dragOverBreadcrumb === 'root' && <i className="fas fa-download text-[9px] ml-0.5 opacity-60"></i>}
           </button>
 
           {selectedUserEmail && (
@@ -1887,10 +1911,19 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               <button
                 type="button"
                 onClick={() => setCurrentFolderId(null)}
-                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${!currentFolderId ? 'text-primary font-semibold bg-primary/5' : 'text-gray-text hover:text-dark-text hover:bg-gray-50'}`}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; setDragOverBreadcrumb('user'); }}
+                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverBreadcrumb(null); handleDrop(e, null); }}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${
+                  dragOverBreadcrumb === 'user'
+                    ? 'bg-primary/10 text-primary border border-primary/30 scale-105 shadow-sm'
+                    : !currentFolderId
+                    ? 'text-primary font-semibold bg-primary/5'
+                    : 'text-gray-text hover:text-dark-text hover:bg-gray-50'
+                }`}
               >
                 <i className="fas fa-user text-xs"></i>
                 {selectedUserEmail}
+                {dragOverBreadcrumb === 'user' && <i className="fas fa-download text-[9px] ml-1 opacity-60"></i>}
               </button>
             </>
           )}
@@ -1911,9 +1944,18 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
                 <button
                   type="button"
                   onClick={() => setCurrentFolderId(folder.id)}
-                  className={`px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${folder.id === currentFolderId ? 'text-primary font-semibold bg-primary/5' : 'text-gray-text hover:text-dark-text hover:bg-gray-50'}`}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; setDragOverBreadcrumb(folder.id); }}
+                  onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverBreadcrumb(null); handleDrop(e, folder.id); }}
+                  className={`px-2 py-1 rounded-lg transition-all duration-150 whitespace-nowrap ${
+                    dragOverBreadcrumb === folder.id
+                      ? 'bg-primary/10 text-primary border border-primary/30 scale-105 shadow-sm'
+                      : folder.id === currentFolderId
+                      ? 'text-primary font-semibold bg-primary/5'
+                      : 'text-gray-text hover:text-dark-text hover:bg-gray-50'
+                  }`}
                 >
                   {folder.name}
+                  {dragOverBreadcrumb === folder.id && <i className="fas fa-download text-[9px] ml-1.5 opacity-60"></i>}
                 </button>
               </div>
             ));
