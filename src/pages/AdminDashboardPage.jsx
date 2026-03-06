@@ -236,6 +236,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   const [renamingFolder, setRenamingFolder] = useState(null);
   const [renameValue, setRenameValue] = useState('');
   const [dragOverFolder, setDragOverFolder] = useState(null);
+  const [dragOverBreadcrumb, setDragOverBreadcrumb] = useState(null); // 'root' | 'user' | folderId
   const [deleteFolderConfirm, setDeleteFolderConfirm] = useState(null);
   const [isDraggingAny, setIsDraggingAny] = useState(false);
 
