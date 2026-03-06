@@ -77,9 +77,25 @@ export function useAdminUsers() {
     await fetchUsers();
   }, [getIdToken, fetchUsers]);
 
+  const changePassword = useCallback(async (uid, password) => {
+    const token = await getIdToken();
+    const res = await fetch(`/api/admin/users/${uid}/password`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to change password.');
+    }
+  }, [getIdToken]);
+
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
 
-  return { users, loading, error, fetchUsers, createUser, deleteUser, toggleAdmin };
+  return { users, loading, error, fetchUsers, createUser, deleteUser, toggleAdmin, changePassword };
 }

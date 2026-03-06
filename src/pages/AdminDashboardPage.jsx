@@ -3517,7 +3517,7 @@ export default function AdminDashboardPage() {
   const { files: allFiles, loading: filesLoading, error: filesError } = useFirestoreFiles();
   const { folders: allFolders, loading: foldersLoading, refetch: refetchFolders } = useFolders();
   const folderActions = useFolderActions();
-  const { users, loading: usersLoading, error: usersError, createUser, deleteUser, toggleAdmin } = useAdminUsers();
+  const { users, loading: usersLoading, error: usersError, createUser, deleteUser, toggleAdmin, changePassword } = useAdminUsers();
 
   useEffect(() => {
     document.title = 'Admin Dashboard - DigiScribe';
@@ -3573,6 +3573,17 @@ export default function AdminDashboardPage() {
           ? `Admin privileges granted to "${email}".`
           : `Admin privileges revoked from "${email}".`,
       });
+    } catch (err) {
+      setUserMessage({ type: 'error', text: err.message });
+      throw err;
+    }
+  };
+
+  const handleChangePassword = async (uid, email, password) => {
+    setUserMessage(null);
+    try {
+      await changePassword(uid, password);
+      setUserMessage({ type: 'success', text: `Password updated for "${email}".` });
     } catch (err) {
       setUserMessage({ type: 'error', text: err.message });
       throw err;
@@ -3644,6 +3655,7 @@ export default function AdminDashboardPage() {
                 users={users}
                 onDeleteUser={handleDeleteUser}
                 onToggleAdmin={handleToggleAdmin}
+                onChangePassword={handleChangePassword}
                 loading={usersLoading}
                 onOpenCreate={() => setCreateUserOpen(true)}
               />

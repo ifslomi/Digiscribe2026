@@ -75,9 +75,18 @@ router.delete('/users/:uid', verifyAdmin, async (req, res) => {
     const targetUser = await adminAuth.getUser(req.params.uid);
     const claims = targetUser.customClaims || {};
     const targetRole = claims.role || (claims.admin ? 'admin' : 'user');
-    // Protect root admins — those with no createdByUid and admin role cannot be deleted
-    if (targetRole === 'admin' && !claims.createdByUid) {
+    // Protect root admins — only block deletion if the target is an admin with no createdByUid
+    // AND the requester is also a root admin (no createdByUid). This prevents one created-admin
+    // from deleting another, while allowing the true root admin to clean up stuck accounts.
+    const requesterClaims = (await adminAuth.getUser(req.user.uid)).customClaims || {};
+    const requesterIsRoot = !requesterClaims.createdByUid;
+    const targetIsRoot = targetRole === 'admin' && !claims.createdByUid;
+    if (targetIsRoot && !requesterIsRoot) {
       return res.status(403).json({ success: false, error: 'This admin account is protected and cannot be deleted.' });
+    }
+    // Root admin cannot delete themselves
+    if (req.params.uid === req.user.uid) {
+      return res.status(403).json({ success: false, error: 'You cannot delete your own account.' });
     }
     await adminAuth.deleteUser(req.params.uid);
     res.json({ success: true });
@@ -95,9 +104,25 @@ router.put('/users/:uid/role', verifyAdmin, async (req, res) => {
   }
 
   try {
-    const claims = { role };
-    await adminAuth.setCustomUserClaims(req.params.uid, claims);
+    // Preserve existing claims (e.g. createdByUid) — only overwrite role
+    const targetUser = await adminAuth.getUser(req.params.uid);
+    const existingClaims = targetUser.customClaims || {};
+    await adminAuth.setCustomUserClaims(req.params.uid, { ...existingClaims, role });
     res.json({ success: true, role });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/admin/users/:uid/password - Change a user's password (admin only)
+router.put('/users/:uid/password', verifyAdmin, async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 6 characters.' });
+  }
+  try {
+    await adminAuth.updateUser(req.params.uid, { password });
+    res.json({ success: true });
   } catch (err) {
     res.status(400).json({ success: false, error: err.message });
   }
