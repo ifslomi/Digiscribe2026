@@ -996,6 +996,8 @@ export default function DashboardPage() {
     if (contextMenu.type === 'folder') {
       const folder = contextMenu.folder;
       return [
+        { icon: 'fa-check-square', label: selectedIds.has(folder.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(folder.id) },
+        { divider: true },
         { icon: 'fa-folder-open', label: 'Open', onClick: () => setCurrentFolderId(folder.id) },
         { icon: 'fa-pencil-alt', label: 'Rename', onClick: () => setRenameFolderModal({ id: folder.id, name: folder.name || '' }) },
         { icon: 'fa-arrows-alt', label: 'Move to...', onClick: () => setMoveTarget({ type: 'folder', item: folder }) },
@@ -1029,6 +1031,8 @@ export default function DashboardPage() {
     const selCount = [...selectedIds].filter((id) => filteredIds.has(id)).length;
 
     if (selCount <= 1) {
+      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
+      items.push({ divider: true });
       items.push({ icon: 'fa-eye', label: 'Preview', onClick: () => setPreviewFile(file) });
       items.push({ icon: 'fa-sticky-note', label: 'View Note', disabled: !hasNote, onClick: () => setNoteFile(file) });
       if (isUrl && sourceHref) {
@@ -1061,13 +1065,14 @@ export default function DashboardPage() {
       }
       items.push({ divider: true });
       items.push({ icon: 'fa-folder-open', label: 'Move to Folder...', onClick: () => setMoveTarget({ type: 'file', item: file }) });
-      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
       items.push({ divider: true });
       items.push({ icon: 'fa-info-circle', label: 'Properties', onClick: () => setPropertiesFile(file) });
       items.push({ icon: 'fa-trash-alt', label: 'Delete', danger: true, onClick: () => setDeleteConfirm(file.id) });
     }
 
     if (selCount > 1) {
+      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
+      items.push({ divider: true });
       items.push({ icon: 'fa-arrows-alt', label: 'Move Selected', onClick: () => setBulkMoveActive(true) });
       items.push({ icon: 'fa-times-circle', label: 'Deselect All', onClick: () => setSelectedIds(new Set()) });
       items.push({ icon: 'fa-trash-alt', label: 'Delete Selected', danger: true, onClick: () => setBulkDeleteConfirm(true) });

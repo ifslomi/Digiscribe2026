@@ -19,6 +19,7 @@ import { ServicePicker, SERVICE_TREE } from '../components/dashboard/FolderFilte
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import RenameDialog from '../components/ui/RenameDialog';
 import { Button } from '../components/ui/button';
+import { Dialog, DialogContent } from '../components/ui/dialog';
 import CreateUserForm from '../components/admin/CreateUserForm';
 import UserTable from '../components/admin/UserTable';
 import { useFirestoreFiles } from '../hooks/useFirestoreFiles';
@@ -1450,6 +1451,8 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     if (contextMenu.type === 'folder') {
       const folder = contextMenu.folder;
       return [
+        { icon: 'fa-check-square', label: selectedIds.has(folder.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(folder.id) },
+        { divider: true },
         { icon: 'fa-folder-open', label: 'Open', onClick: () => setCurrentFolderId(folder.id) },
         { icon: 'fa-pencil-alt', label: 'Rename', onClick: () => setRenameModal({ type: 'folder', id: folder.id, value: folder.name || '' }) },
         { icon: 'fa-arrows-alt', label: 'Move to...', onClick: () => setMoveTarget({ type: 'folder', item: folder }) },
@@ -1486,6 +1489,8 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     const selCount = [...selectedIds].filter((id) => filteredIds.has(id)).length;
 
     if (selCount <= 1) {
+      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
+      items.push({ divider: true });
       items.push({ icon: 'fa-eye', label: 'Preview', onClick: () => setPreviewFile(file) });
       items.push({ icon: 'fa-sticky-note', label: 'View Note', disabled: !hasNote, onClick: () => setNoteFile(file) });
       if (isUrl && sourceHref) {
@@ -1519,13 +1524,14 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
       if (!isUrl) {
         items.push({ icon: 'fa-file-import', label: 'Use as Transcription for...', onClick: () => { setAttachAsTranscriptionSource(file); setAttachTargetSearch(''); setContextMenu(null); } });
       }
-      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
       items.push({ divider: true });
       items.push({ icon: 'fa-info-circle', label: 'Properties', onClick: () => setPropertiesFile(file) });
       items.push({ icon: 'fa-trash-alt', label: 'Delete', danger: true, onClick: () => { setDeleteConfirm(file.id); } });
     }
 
     if (selCount > 1) {
+      items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
+      items.push({ divider: true });
       items.push({ icon: 'fa-download', label: `Download ${selCount} Selected as ZIP`, onClick: () => handleBulkDownload() });
       items.push({ divider: true });
       items.push({ icon: 'fa-sliders-h', label: `Change Status of ${selCount} Selected`, onClick: () => { setStatusChangeTarget({ bulkMode: true, count: selCount }); setContextMenu(null); } });
@@ -3506,6 +3512,7 @@ export default function AdminDashboardPage() {
   const toast = useAppToast();
   const [activeTab, setActiveTab] = useState('files');
   const [userMessage, setUserMessage] = useState(null);
+  const [createUserOpen, setCreateUserOpen] = useState(false);
 
   const { files: allFiles, loading: filesLoading, error: filesError } = useFirestoreFiles();
   const { folders: allFolders, loading: foldersLoading, refetch: refetchFolders } = useFolders();
@@ -3535,31 +3542,36 @@ export default function AdminDashboardPage() {
     setUserMessage(null);
     try {
       await createUser(data);
-      setUserMessage({ type: 'success', text: `User "${data.email}" created successfully.` });
+      setCreateUserOpen(false);
+      const roleLabel = data.admin ? 'Admin' : 'User';
+      const nameLabel = data.displayName ? ` (${data.displayName})` : '';
+      setUserMessage({ type: 'success', text: `${roleLabel} "${data.email}"${nameLabel} created successfully.` });
     } catch (err) {
       setUserMessage({ type: 'error', text: err.message });
       throw err;
     }
   };
 
-  const handleDeleteUser = async (uid) => {
+  const handleDeleteUser = async (uid, email) => {
     setUserMessage(null);
     try {
       await deleteUser(uid);
-      setUserMessage({ type: 'success', text: 'User deleted successfully.' });
+      setUserMessage({ type: 'success', text: `User "${email}" has been deleted.` });
     } catch (err) {
       setUserMessage({ type: 'error', text: err.message });
       throw err;
     }
   };
 
-  const handleToggleAdmin = async (uid, isAdmin) => {
+  const handleToggleAdmin = async (uid, isAdmin, email) => {
     setUserMessage(null);
     try {
       await toggleAdmin(uid, isAdmin);
       setUserMessage({
         type: 'success',
-        text: isAdmin ? 'Admin privileges granted.' : 'Admin privileges revoked.',
+        text: isAdmin
+          ? `Admin privileges granted to "${email}".`
+          : `Admin privileges revoked from "${email}".`,
       });
     } catch (err) {
       setUserMessage({ type: 'error', text: err.message });
@@ -3628,12 +3640,29 @@ export default function AdminDashboardPage() {
           )}
           {activeTab === 'users' && (
             <div className="space-y-6">
-              <CreateUserForm onCreateUser={handleCreateUser} loading={usersLoading} />
-              <UserTable users={users} onDeleteUser={handleDeleteUser} onToggleAdmin={handleToggleAdmin} loading={usersLoading} />
+              <UserTable
+                users={users}
+                onDeleteUser={handleDeleteUser}
+                onToggleAdmin={handleToggleAdmin}
+                loading={usersLoading}
+                onOpenCreate={() => setCreateUserOpen(true)}
+              />
             </div>
           )}
         </div>
       </div>
+
+      {/* Add New User Modal */}
+      <Dialog open={createUserOpen} onOpenChange={setCreateUserOpen}>
+        <DialogContent className="max-w-md">
+          <CreateUserForm
+            onCreateUser={handleCreateUser}
+            loading={usersLoading}
+            onClose={() => setCreateUserOpen(false)}
+          />
+        </DialogContent>
+      </Dialog>
     </Layout>
   );
 }
+

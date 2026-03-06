@@ -4,14 +4,14 @@ import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Card } from '../ui/card';
 
-export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading }) {
+export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading, onOpenCreate }) {
   const [confirmAction, setConfirmAction] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
 
-  const handleDelete = async (uid) => {
+  const handleDelete = async (uid, email) => {
     setActionLoading(uid);
     try {
-      await onDeleteUser(uid);
+      await onDeleteUser(uid, email);
     } catch {
       // Error handled by parent
     } finally {
@@ -20,10 +20,10 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
     }
   };
 
-  const handleToggleAdmin = async (uid, currentIsAdmin) => {
+  const handleToggleAdmin = async (uid, currentIsAdmin, email) => {
     setActionLoading(uid);
     try {
-      await onToggleAdmin(uid, !currentIsAdmin);
+      await onToggleAdmin(uid, !currentIsAdmin, email);
     } catch {
       // Error handled by parent
     } finally {
@@ -80,10 +80,16 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
           <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
             <i className="fas fa-users text-primary"></i>
           </div>
-          <div>
+          <div className="flex-1 min-w-0">
             <h3 className="text-lg font-semibold text-dark-text">Users</h3>
             <p className="text-xs text-gray-text">{users.length} user{users.length !== 1 ? 's' : ''} total</p>
           </div>
+          {onOpenCreate && (
+            <Button onClick={onOpenCreate} size="sm" className="flex-shrink-0 gap-1.5">
+              <i className="fas fa-user-plus text-xs"></i>
+              Add New User
+            </Button>
+          )}
         </div>
       </div>
 
@@ -108,7 +114,12 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
                         {user.email?.[0] || '?'}
                       </span>
                     </div>
-                    <span className="text-sm font-medium text-dark-text truncate max-w-[200px]">{user.email}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-dark-text truncate max-w-[200px]">{user.email}</p>
+                      {user.displayName && (
+                        <p className="text-xs text-gray-text truncate max-w-[200px]">{user.displayName}</p>
+                      )}
+                    </div>
                   </div>
                 </td>
                 <td className="px-4 py-4">
@@ -129,27 +140,38 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
                 </td>
                 <td className="px-8 py-4">
                   <div className="flex items-center justify-end gap-2">
-                    <Button
-                      onClick={() => setConfirmAction({ type: 'role', user })}
-                      disabled={actionLoading === user.uid}
-                      size="sm"
-                      variant={user.role === 'admin' ? 'secondary' : 'default'}
-                      className={user.role === 'admin' ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : ''}
-                      title={user.role === 'admin' ? 'Remove admin' : 'Make admin'}
-                    >
-                      <i className={`fas ${user.role === 'admin' ? 'fa-user-minus' : 'fa-user-shield'}`}></i>
-                      {user.role === 'admin' ? 'Remove Admin' : 'Make Admin'}
-                    </Button>
-
-                    <Button
-                      onClick={() => setConfirmAction({ type: 'delete', user })}
-                      disabled={actionLoading === user.uid}
-                      size="sm"
-                      variant="destructive"
-                    >
-                      <i className="fas fa-trash-alt"></i>
-                      Delete
-                    </Button>
+                    {user.role === 'admin' && !user.createdByUid ? (
+                      <span
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-gray-400 bg-gray-100 cursor-not-allowed"
+                        title="Root admin — cannot be modified"
+                      >
+                        <i className="fas fa-lock text-[10px]"></i>
+                        Protected
+                      </span>
+                    ) : (
+                      <>
+                        <Button
+                          onClick={() => setConfirmAction({ type: 'role', user })}
+                          disabled={actionLoading === user.uid}
+                          size="sm"
+                          variant={user.role === 'admin' ? 'secondary' : 'default'}
+                          className={user.role === 'admin' ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : ''}
+                          title={user.role === 'admin' ? 'Remove admin' : 'Make admin'}
+                        >
+                          <i className={`fas ${user.role === 'admin' ? 'fa-user-minus' : 'fa-user-shield'}`}></i>
+                          {user.role === 'admin' ? 'Remove Admin' : 'Make Admin'}
+                        </Button>
+                        <Button
+                          onClick={() => setConfirmAction({ type: 'delete', user })}
+                          disabled={actionLoading === user.uid}
+                          size="sm"
+                          variant="destructive"
+                        >
+                          <i className="fas fa-trash-alt"></i>
+                          Delete
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -171,7 +193,9 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-dark-text truncate">{user.email}</p>
-
+                  {user.displayName && (
+                    <p className="text-xs text-gray-text truncate">{user.displayName}</p>
+                  )}
                 </div>
               </div>
               {user.role === 'admin' ? (
@@ -193,27 +217,38 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
             </p>
 
             <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
-              <Button
-                onClick={() => setConfirmAction({ type: 'role', user })}
-                disabled={actionLoading === user.uid}
-                size="sm"
-                variant={user.role === 'admin' ? 'secondary' : 'default'}
-                className={`flex-1 ${user.role === 'admin' ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : ''}`}
-              >
-                <i className={`fas ${user.role === 'admin' ? 'fa-user-minus' : 'fa-user-shield'}`}></i>
-                {user.role === 'admin' ? 'Remove Admin' : 'Make Admin'}
-              </Button>
-
-              <Button
-                onClick={() => setConfirmAction({ type: 'delete', user })}
-                disabled={actionLoading === user.uid}
-                size="sm"
-                variant="destructive"
-                className="flex-1"
-              >
-                <i className="fas fa-trash-alt"></i>
-                Delete
-              </Button>
+              {user.role === 'admin' && !user.createdByUid ? (
+                <span
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium text-gray-400 bg-gray-100 cursor-not-allowed"
+                  title="Root admin — cannot be modified"
+                >
+                  <i className="fas fa-lock text-[10px]"></i>
+                  Protected
+                </span>
+              ) : (
+                <>
+                  <Button
+                    onClick={() => setConfirmAction({ type: 'role', user })}
+                    disabled={actionLoading === user.uid}
+                    size="sm"
+                    variant={user.role === 'admin' ? 'secondary' : 'default'}
+                    className={`flex-1 ${user.role === 'admin' ? 'text-amber-700 bg-amber-50 hover:bg-amber-100' : ''}`}
+                  >
+                    <i className={`fas ${user.role === 'admin' ? 'fa-user-minus' : 'fa-user-shield'}`}></i>
+                    {user.role === 'admin' ? 'Remove Admin' : 'Make Admin'}
+                  </Button>
+                  <Button
+                    onClick={() => setConfirmAction({ type: 'delete', user })}
+                    disabled={actionLoading === user.uid}
+                    size="sm"
+                    variant="destructive"
+                    className="flex-1"
+                  >
+                    <i className="fas fa-trash-alt"></i>
+                    Delete
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         ))}
@@ -231,10 +266,10 @@ export default function UserTable({ users, onDeleteUser, onToggleAdmin, loading 
         onConfirm={() => {
           if (!confirmAction?.user) return;
           if (confirmAction.type === 'role') {
-            handleToggleAdmin(confirmAction.user.uid, confirmAction.user.role === 'admin');
+            handleToggleAdmin(confirmAction.user.uid, confirmAction.user.role === 'admin', confirmAction.user.email);
             return;
           }
-          handleDelete(confirmAction.user.uid);
+          handleDelete(confirmAction.user.uid, confirmAction.user.email);
         }}
         onCancel={() => setConfirmAction(null)}
       />

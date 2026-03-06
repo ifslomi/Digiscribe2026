@@ -399,14 +399,6 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
             Your browser does not support the video element.
           </video>
 
-          {mediaLoading && (
-            <div className="absolute inset-0 rounded-lg bg-black/25 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 text-xs font-medium text-gray-700 shadow">
-                <i className="fas fa-spinner fa-spin text-primary"></i>
-                Loading video preview...
-              </div>
-            </div>
-          )}
         </div>
       );
     }
@@ -478,14 +470,6 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
             Your browser does not support the video element.
           </video>
 
-          {mediaLoading && (
-            <div className="absolute inset-0 rounded-lg bg-black/25 backdrop-blur-[1px] flex items-center justify-center pointer-events-none">
-              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 text-xs font-medium text-gray-700 shadow">
-                <i className="fas fa-spinner fa-spin text-primary"></i>
-                Loading video preview...
-              </div>
-            </div>
-          )}
         </div>
       );
     }

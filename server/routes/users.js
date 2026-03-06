@@ -25,6 +25,7 @@ router.get('/users', verifyAdmin, async (req, res) => {
         displayName: u.displayName || '',
         disabled: u.disabled,
         role,
+        createdByUid: claims.createdByUid || null,
         createdAt: u.metadata.creationTime,
       };
     });
@@ -51,7 +52,7 @@ router.post('/users', verifyAdmin, async (req, res) => {
       displayName: displayName || '',
     });
 
-    const claims = { role: userRole };
+    const claims = { role: userRole, createdByUid: req.user.uid };
     await adminAuth.setCustomUserClaims(userRecord.uid, claims);
 
     res.json({
@@ -71,6 +72,13 @@ router.post('/users', verifyAdmin, async (req, res) => {
 // DELETE /api/admin/users/:uid - Delete a user (admin only)
 router.delete('/users/:uid', verifyAdmin, async (req, res) => {
   try {
+    const targetUser = await adminAuth.getUser(req.params.uid);
+    const claims = targetUser.customClaims || {};
+    const targetRole = claims.role || (claims.admin ? 'admin' : 'user');
+    // Protect root admins — those with no createdByUid and admin role cannot be deleted
+    if (targetRole === 'admin' && !claims.createdByUid) {
+      return res.status(403).json({ success: false, error: 'This admin account is protected and cannot be deleted.' });
+    }
     await adminAuth.deleteUser(req.params.uid);
     res.json({ success: true });
   } catch (err) {
