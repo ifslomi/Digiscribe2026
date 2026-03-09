@@ -5,14 +5,69 @@ import { createPortal } from 'react-dom';
 import { TikTokEmbed, FacebookEmbed } from 'react-social-media-embed';
 import { fileUrl, fileDownloadUrl } from '../../lib/fileUrl';
 
-function getFileMediaType(type) {
-  if (!type) return 'unknown';
-  if (type.startsWith('image/')) return 'image';
-  if (type.startsWith('audio/')) return 'audio';
-  if (type.startsWith('video/')) return 'video';
-  if (type === 'application/pdf') return 'pdf';
-  if (type.startsWith('text/')) return 'text';
+function getFileMediaType(type, fileName = '') {
+  const normalizedType = String(type || '').toLowerCase();
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase() || '';
+  const officeExts = new Set(['doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'rtf', 'odt']);
+
+  if (normalizedType.startsWith('image/')) return 'image';
+  if (normalizedType.startsWith('audio/')) return 'audio';
+  if (normalizedType.startsWith('video/')) return 'video';
+  if (normalizedType === 'application/pdf' || ext === 'pdf') return 'pdf';
+
+  // Extension takes precedence for office docs because some uploads are tagged as text/plain.
+  if (officeExts.has(ext)) return 'office';
+
+  if (normalizedType.startsWith('text/') || ['txt', 'csv'].includes(ext)) return 'text';
+  if (
+    normalizedType === 'application/msword' ||
+    normalizedType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    normalizedType === 'application/vnd.ms-excel' ||
+    normalizedType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    normalizedType === 'application/vnd.ms-powerpoint' ||
+    normalizedType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ||
+    normalizedType === 'application/rtf' ||
+    normalizedType === 'application/vnd.oasis.opendocument.text' ||
+    officeExts.has(ext)
+  ) {
+    return 'office';
+  }
+
   return 'unknown';
+}
+
+function getFriendlyTypeLabel(type, fileName = '') {
+  const mediaType = getFileMediaType(type, fileName);
+  if (mediaType === 'image') return 'Image';
+  if (mediaType === 'audio') return 'Audio';
+  if (mediaType === 'video') return 'Video';
+  if (mediaType === 'pdf') return 'PDF';
+  if (mediaType === 'text') return 'Text';
+  if (mediaType === 'office') {
+    const ext = String(fileName || '').split('.').pop()?.toLowerCase() || '';
+    if (ext === 'xls' || ext === 'xlsx') return 'Excel';
+    if (ext === 'doc' || ext === 'docx') return 'Word';
+    if (ext === 'ppt' || ext === 'pptx') return 'PowerPoint';
+    return 'Office';
+  }
+  return type || 'Unknown';
+}
+
+function isAllowedByCurrentUploadPolicy(type, fileName = '') {
+  const normalizedType = String(type || '').toLowerCase();
+  if (!normalizedType) return false;
+  if (normalizedType.startsWith('image/') || normalizedType.startsWith('audio/') || normalizedType.startsWith('video/')) return true;
+
+  const allowedDocMimes = new Set([
+    'application/pdf',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ]);
+  if (allowedDocMimes.has(normalizedType)) return true;
+
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase() || '';
+  return ['pdf', 'txt', 'doc', 'docx'].includes(ext);
 }
 
 export function getMediaType(url) {
@@ -205,8 +260,9 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
     if (e.target === overlayRef.current) onClose();
   };
 
-  const mediaType = getFileMediaType(file.type);
   const isUrlUpload = file.sourceType === 'url';
+  const mediaType = getFileMediaType(file.type, file.originalName);
+  const isDisallowedLegacyFile = !isUrlUpload && !isAllowedByCurrentUploadPolicy(file.type, file.originalName);
 
   useEffect(() => {
     setReferenceSourceUrl(null);
@@ -280,6 +336,11 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
     const fileId = extractGoogleDriveId(embeddableSourceUrl);
     return fileId ? `https://drive.google.com/file/d/${fileId}/preview` : null;
   }, [embeddableSourceUrl]);
+  const officeViewerUrl = useMemo(() => {
+    if (mediaType !== 'office' || !file.url) return null;
+    const absoluteUrl = `${window.location.origin}${fileUrl(file.url)}`;
+    return `https://docs.google.com/gview?url=${encodeURIComponent(absoluteUrl)}&embedded=true`;
+  }, [mediaType, file.url]);
 
   useEffect(() => {
     setMediaError(null);
@@ -294,6 +355,7 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
     if (mediaType === 'audio') return { icon: 'fa-music', color: 'text-sky-600 bg-sky-50' };
     if (mediaType === 'video') return { icon: 'fa-video', color: 'text-rose-500 bg-rose-50' };
     if (mediaType === 'pdf') return { icon: 'fa-file-pdf', color: 'text-red-600 bg-red-50' };
+    if (mediaType === 'office') return { icon: 'fa-file-word', color: 'text-blue-600 bg-blue-50' };
     if (mediaType === 'text') return { icon: 'fa-file-alt', color: 'text-gray-600 bg-gray-50' };
     if (isUrlUpload) return { icon: 'fa-link', color: 'text-indigo-600 bg-indigo-50' };
     return { icon: 'fa-file', color: 'text-gray-400 bg-gray-50' };
@@ -485,6 +547,18 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
       );
     }
 
+    if (mediaType === 'office' && officeViewerUrl) {
+      return (
+        <iframe
+          src={officeViewerUrl}
+          className="w-full border-0"
+          style={{ minHeight: '70vh' }}
+          title={file.originalName}
+          sandbox="allow-scripts allow-same-origin allow-popups"
+        />
+      );
+    }
+
     if (mediaType === 'text') {
       return (
         <div className="w-full">
@@ -564,7 +638,7 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
                 {file.originalName}
               </h3>
               <div className="flex items-center gap-2 text-[11px] text-gray-400">
-                {(isUrlUpload ? getPlatformLabel(urlMediaType) : file.type) && <span>{isUrlUpload ? getPlatformLabel(urlMediaType) : file.type}</span>}
+                {(isUrlUpload ? getPlatformLabel(urlMediaType) : getFriendlyTypeLabel(file.type, file.originalName)) && <span>{isUrlUpload ? getPlatformLabel(urlMediaType) : getFriendlyTypeLabel(file.type, file.originalName)}</span>}
                 {formatSize(file.size) && (
                   <>
                     <span className="text-gray-200">·</span>
@@ -583,7 +657,14 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
         </div>
 
         {/* Content */}
-        <div className={`flex-1 min-h-0 bg-gray-50/50 ${mediaType === 'pdf' ? 'overflow-auto' : 'overflow-hidden p-6 flex items-center justify-center'}`}>
+        {isDisallowedLegacyFile && (
+          <div className="mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <p className="text-xs font-medium text-amber-800">
+              Legacy file notice: this file type is no longer allowed for upload under current policy (allowed docs: PDF/TXT/DOC/DOCX).
+            </p>
+          </div>
+        )}
+        <div className={`flex-1 min-h-0 bg-gray-50/50 ${mediaType === 'pdf' || mediaType === 'office' ? 'overflow-auto' : 'overflow-hidden p-6 flex items-center justify-center'}`}>
           {renderContent()}
         </div>
 

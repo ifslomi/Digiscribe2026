@@ -2,12 +2,38 @@ import { Router } from 'express';
 import multer from 'multer';
 import { adminDb } from '../firebaseAdmin.js';
 import { verifyAuth } from '../middleware/authMiddleware.js';
-import { deleteFromFtp, moveOnFtp, uploadBufferToFtp } from '../services/ftp.js';
+import { deleteFromFtp, downloadBufferFromFtp, moveOnFtp, uploadBufferToFtp } from '../services/ftp.js';
 import { computeFileFtpPath, buildTranscriptionFtpPath } from '../services/ftpPathResolver.js';
 import path from 'path';
 
 const router = Router();
 const transcriptionUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+const MAX_TRANSCRIPTION_SIZE_BYTES = 50 * 1024 * 1024;
+const ALLOWED_TRANSCRIPTION_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',
+]);
+const ALLOWED_TRANSCRIPTION_EXTENSIONS = new Set([
+  '.pdf', '.txt', '.csv', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.rtf', '.odt',
+]);
+const TRANSCRIPTION_FORMAT_ERROR = 'Unsupported transcription format. Only PDF, TXT/CSV, DOC/DOCX, XLS/XLSX, PPT/PPTX, RTF, and ODT are allowed.';
+
+function isAllowedTranscriptionFormat(mimeType, fileName) {
+  const normalizedMime = typeof mimeType === 'string' ? mimeType.toLowerCase().trim() : '';
+  if (normalizedMime && ALLOWED_TRANSCRIPTION_MIME_TYPES.has(normalizedMime)) return true;
+  const ext = path.posix.extname(String(fileName || '')).toLowerCase();
+  if (ext && ALLOWED_TRANSCRIPTION_EXTENSIONS.has(ext)) return true;
+  return false;
+}
 
 // POST /api/files/metadata - Save file metadata
 router.post('/metadata', verifyAuth, async (req, res) => {
@@ -312,6 +338,9 @@ router.post('/metadata/:fileId/transcription', verifyAuth, transcriptionUpload.s
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No transcription file provided.' });
   }
+  if (!isAllowedTranscriptionFormat(req.file.mimetype, req.file.originalname)) {
+    return res.status(400).json({ success: false, error: TRANSCRIPTION_FORMAT_ERROR });
+  }
 
   try {
     const docRef = adminDb.collection('files').doc(req.params.fileId);
@@ -371,6 +400,128 @@ router.post('/metadata/:fileId/transcription', verifyAuth, transcriptionUpload.s
     });
   } catch (err) {
     console.error('[transcription] upload error:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/files/metadata/:fileId/transcription/from-file - Attach transcription from an existing file (admin only)
+router.post('/metadata/:fileId/transcription/from-file', verifyAuth, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required.' });
+  }
+
+  const sourceFileId = typeof req.body?.sourceFileId === 'string' ? req.body.sourceFileId.trim() : '';
+  if (!sourceFileId) {
+    return res.status(400).json({ success: false, error: 'sourceFileId is required.' });
+  }
+
+  if (sourceFileId === req.params.fileId) {
+    return res.status(400).json({ success: false, error: 'Source and target file cannot be the same.' });
+  }
+
+  try {
+    const targetRef = adminDb.collection('files').doc(req.params.fileId);
+    const sourceRef = adminDb.collection('files').doc(sourceFileId);
+    const [targetDoc, sourceDoc] = await Promise.all([targetRef.get(), sourceRef.get()]);
+
+    if (!targetDoc.exists) {
+      return res.status(404).json({ success: false, error: 'Target file not found.' });
+    }
+    if (!sourceDoc.exists) {
+      return res.status(404).json({ success: false, error: 'Source file not found.' });
+    }
+
+    const targetData = targetDoc.data();
+    const sourceData = sourceDoc.data();
+
+    const sourceStoragePath = sourceData.storagePath || sourceData.savedAs;
+    if (!sourceStoragePath) {
+      return res.status(400).json({ success: false, error: 'Source file has no stored file path.' });
+    }
+
+    const sourceNameForValidation = sourceData.originalName || sourceData.savedAs || '';
+    if (!isAllowedTranscriptionFormat(sourceData.type, sourceNameForValidation)) {
+      return res.status(400).json({ success: false, error: TRANSCRIPTION_FORMAT_ERROR });
+    }
+
+    const sourceSize = Number(sourceData.size) || 0;
+    if (sourceSize > MAX_TRANSCRIPTION_SIZE_BYTES) {
+      return res.status(400).json({ success: false, error: 'Source file exceeds 50MB transcription limit.' });
+    }
+
+    const ownerEmail = targetData.uploadedByEmail || 'unknown';
+    const targetName = targetData.originalName || 'file';
+    const targetExt = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
+    const targetBase = targetExt ? targetName.slice(0, -targetExt.length) : targetName;
+    const sourceName = sourceData.originalName || sourceData.savedAs || 'transcription';
+    const sourceExt = sourceName.includes('.') ? sourceName.slice(sourceName.lastIndexOf('.')) : '';
+    const transcriptionExt = sourceExt || '.txt';
+
+    const safeTargetBase = targetBase.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const displayName = `Transcribed_${targetBase}${transcriptionExt}`;
+    const transcriptionFileName = `Transcribed_${safeTargetBase}${transcriptionExt}`;
+    const ftpPath = buildTranscriptionFtpPath(ownerEmail, transcriptionFileName);
+
+    if (targetData.transcriptionStoragePath) {
+      try {
+        await deleteFromFtp(targetData.transcriptionStoragePath);
+      } catch (e) {
+        console.warn('[transcription] Failed to delete old transcription from FTP:', e.message);
+      }
+    }
+
+    const sourceBuffer = await downloadBufferFromFtp(sourceStoragePath);
+    await uploadBufferToFtp(sourceBuffer, ftpPath);
+
+    const encodedPath = ftpPath.split('/').map(encodeURIComponent).join('/');
+    const transcriptionUrl = `/api/files/${encodedPath}`;
+
+    await targetRef.update({
+      transcriptionUrl,
+      transcriptionName: displayName,
+      transcriptionStoragePath: ftpPath,
+      transcriptionSize: sourceSize || sourceBuffer.length,
+      transcriptionType: sourceData.type || 'application/octet-stream',
+      transcriptionAttachedAt: new Date(),
+      status: 'transcribed',
+      updatedAt: new Date(),
+    });
+
+    // Move behavior: after attaching to target, remove source file and its metadata.
+    const warnings = [];
+    try {
+      await deleteFromFtp(sourceStoragePath);
+    } catch (err) {
+      warnings.push('Attached successfully, but failed to delete source file from storage.');
+      console.warn('[transcription-from-file] source delete warning:', err?.message || err);
+    }
+
+    if (sourceData.transcriptionStoragePath) {
+      try {
+        await deleteFromFtp(sourceData.transcriptionStoragePath);
+      } catch (err) {
+        warnings.push('Attached successfully, but failed to clean source transcription file from storage.');
+        console.warn('[transcription-from-file] source transcription cleanup warning:', err?.message || err);
+      }
+    }
+
+    try {
+      await sourceRef.delete();
+    } catch (err) {
+      warnings.push('Attached successfully, but failed to remove source file record.');
+      console.warn('[transcription-from-file] source metadata cleanup warning:', err?.message || err);
+    }
+
+    res.json({
+      success: true,
+      transcriptionUrl,
+      transcriptionName: displayName,
+      transcriptionSize: sourceSize || sourceBuffer.length,
+      moved: warnings.length === 0,
+      warnings,
+    });
+  } catch (err) {
+    console.error('[transcription-from-file] attach error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });

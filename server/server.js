@@ -130,22 +130,25 @@ const pipelineLimiter = rateLimit({
 
 // Accept any image/*, audio/*, video/* MIME type.
 // Admins can also upload document types (PDF, Word, etc.)
-function isAllowedMime(mime, role) {
-  if (!mime) return false;
-  if (mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/')) return true;
+const ADMIN_ALLOWED_DOC_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+const ADMIN_ALLOWED_DOC_EXTENSIONS = new Set(['.pdf', '.txt', '.doc', '.docx']);
+
+function isAllowedMime(mime, role, fileName = '') {
+  const normalizedMime = String(mime || '').toLowerCase();
+  const ext = path.posix.extname(String(fileName || '')).toLowerCase();
+
+  if (!normalizedMime) {
+    return role === 'admin' && !!ext && ADMIN_ALLOWED_DOC_EXTENSIONS.has(ext);
+  }
+  if (normalizedMime.startsWith('image/') || normalizedMime.startsWith('audio/') || normalizedMime.startsWith('video/')) return true;
   if (role === 'admin') {
-    const docTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'text/plain',
-      'text/csv',
-    ];
-    return docTypes.includes(mime);
+    if (ADMIN_ALLOWED_DOC_MIME_TYPES.has(normalizedMime)) return true;
+    if (ext && ADMIN_ALLOWED_DOC_EXTENSIONS.has(ext)) return true;
   }
   return false;
 }
@@ -278,8 +281,8 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'Missing required fields.' });
     }
 
-    if (!isAllowedMime(mimeType, req.user.role)) {
-      return res.status(400).json({ success: false, error: `File type "${mimeType}" is not allowed.` });
+    if (!isAllowedMime(mimeType, req.user.role, fileName)) {
+      return res.status(400).json({ success: false, error: 'File type not allowed. Admin uploads support media plus PDF/TXT/DOC/DOCX documents only.' });
     }
 
     // Build filename: {Service}_{timestamp}-{filename}

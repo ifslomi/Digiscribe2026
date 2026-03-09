@@ -165,7 +165,8 @@ export default function DocumentViewerModal({ file, onClose }) {
                 <i className="fas fa-file text-gray-300 text-2xl"></i>
               </div>
               <p className="text-sm font-medium text-dark-text mb-1">Preview not available</p>
-              <p className="text-xs text-gray-400 mb-4">This file type cannot be previewed in the browser.</p>
+              <p className="text-xs text-gray-400 mb-1">This file type cannot be previewed in the browser.</p>
+              <p className="text-xs text-red-500 mb-4 text-center max-w-md">Unsupported transcription format detected. Allowed formats: PDF, TXT/CSV, DOC/DOCX, XLS/XLSX, PPT/PPTX, RTF, and ODT.</p>
               <button
                 type="button"
                 onClick={downloadUrl}

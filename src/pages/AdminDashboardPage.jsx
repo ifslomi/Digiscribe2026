@@ -118,6 +118,32 @@ function formatRelativeDate(dateString) {
   }
 }
 
+const ALLOWED_TRANSCRIPTION_EXTENSIONS = new Set(['.pdf', '.txt', '.csv', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.rtf', '.odt']);
+const ALLOWED_TRANSCRIPTION_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/rtf',
+  'application/vnd.oasis.opendocument.text',
+]);
+const TRANSCRIPTION_FORMAT_ERROR = 'Unsupported transcription format. Only PDF, TXT/CSV, DOC/DOCX, XLS/XLSX, PPT/PPTX, RTF, and ODT are allowed.';
+
+function isAllowedTranscriptionSourceFile(file) {
+  if (!file) return false;
+  const mime = typeof file.type === 'string' ? file.type.toLowerCase().trim() : '';
+  if (mime && ALLOWED_TRANSCRIPTION_MIME_TYPES.has(mime)) return true;
+  const name = String(file.originalName || file.savedAs || '');
+  const dot = name.lastIndexOf('.');
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : '';
+  return !!ext && ALLOWED_TRANSCRIPTION_EXTENSIONS.has(ext);
+}
+
 function getPageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages = [];
@@ -202,6 +228,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   const [statusLoading, setStatusLoading] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(null);
+  const [downloadLoadingKey, setDownloadLoadingKey] = useState('');
   const [previewFile, setPreviewFile] = useState(null);
   const [noteFile, setNoteFile] = useState(null);
   const [propertiesFile, setPropertiesFile] = useState(null);
@@ -858,23 +885,66 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     setAttachAsTranscriptionLoading(true);
     setMessage(null);
     try {
+      if (!isAllowedTranscriptionSourceFile(sourceFile)) {
+        throw new Error(TRANSCRIPTION_FORMAT_ERROR);
+      }
+
       const token = await getIdToken();
-      const downloadRes = await fetch(fileDownloadUrl(sourceFile.url), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!downloadRes.ok) throw new Error('Failed to fetch source file.');
-      const blob = await downloadRes.blob();
-      const file = new File([blob], sourceFile.originalName || 'transcription', { type: blob.type });
-      const formData = new FormData();
-      formData.append('transcription', file);
-      const res = await fetch(`/api/files/metadata/${targetFile.id}/transcription`, {
+
+      const runLegacyMoveFallback = async () => {
+        const downloadRes = await fetch(fileDownloadUrl(sourceFile.url), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!downloadRes.ok) throw new Error('Failed to fetch source file.');
+
+        const blob = await downloadRes.blob();
+        const uploadFile = new File([blob], sourceFile.originalName || 'transcription', { type: blob.type });
+        const formData = new FormData();
+        formData.append('transcription', uploadFile);
+
+        const attachRes = await fetch(`/api/files/metadata/${targetFile.id}/transcription`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData,
+        });
+        const attachData = await attachRes.json().catch(() => ({}));
+        if (!attachRes.ok || !attachData.success) throw new Error(attachData.error || 'Failed to attach transcription.');
+
+        const deleteSourceRes = await fetch(`/api/files/metadata/${sourceFile.id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const deleteSourceData = await deleteSourceRes.json().catch(() => ({}));
+        if (!deleteSourceRes.ok || !deleteSourceData.success) {
+          throw new Error('Transcription attached, but failed to remove source file. Please delete the source file manually.');
+        }
+
+        setMessage({ type: 'success', text: `Transcription moved to "${targetFile.originalName}" successfully.` });
+      };
+
+      const res = await fetch(`/api/files/metadata/${targetFile.id}/transcription/from-file`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ sourceFileId: sourceFile.id }),
       });
-      const data = await res.json();
+
+      if (res.status === 404) {
+        await runLegacyMoveFallback();
+        setAttachAsTranscriptionSource(null);
+        setAttachTargetSearch('');
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to attach transcription.');
-      setMessage({ type: 'success', text: `Transcription attached to "${targetFile.originalName}" successfully.` });
+      if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+        setMessage({ type: 'error', text: data.warnings[0] });
+      } else {
+        setMessage({ type: 'success', text: `Transcription moved to "${targetFile.originalName}" successfully.` });
+      }
       setAttachAsTranscriptionSource(null);
       setAttachTargetSearch('');
     } catch (err) {
@@ -1414,6 +1484,26 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     }
   }, [getIdToken]);
 
+  const triggerDirectDownload = useCallback((rawUrl, fileName, key) => {
+    const resolved = fileDownloadUrl(rawUrl);
+    if (!resolved) return;
+
+    const loadingKey = key || `download-${Date.now()}`;
+    setDownloadLoadingKey(loadingKey);
+    try {
+      const a = document.createElement('a');
+      a.href = resolved;
+      if (fileName) a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => {
+        setDownloadLoadingKey((prev) => (prev === loadingKey ? '' : prev));
+      }, 1200);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('admin-dashboard-view-mode', viewMode);
@@ -1468,12 +1558,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
       const file = contextMenu.file;
       return [
         { icon: 'fa-eye', label: 'View Transcription', onClick: () => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize }) },
-        { icon: 'fa-download', label: 'Download Transcription', onClick: () => {
-          const a = document.createElement('a');
-          a.href = fileDownloadUrl(file.transcriptionUrl);
-          a.download = file.transcriptionName || 'Transcription';
-          document.body.appendChild(a); a.click(); a.remove();
-        }},
+        { icon: 'fa-download', label: 'Download Transcription', onClick: () => triggerDirectDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`) },
         { divider: true },
         { icon: 'fa-link', label: 'Copy Link', onClick: () => { navigator.clipboard.writeText(window.location.origin + fileUrl(file.transcriptionUrl)).catch(() => {}); } },
         { divider: true },
@@ -1507,13 +1592,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
         const base = ext ? name.slice(0, -ext.length) : name;
         setRenameModal({ type: 'file', id: file.id, value: base, suffix: ext });
       } });
-      items.push({ icon: 'fa-download', label: 'Download', disabled: isUrl, onClick: isUrl ? () => {} : () => {
-        const a = document.createElement('a');
-        a.href = fileDownloadUrl(file.url);
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }});
+      items.push({ icon: 'fa-download', label: 'Download', disabled: isUrl, onClick: isUrl ? () => {} : () => triggerDirectDownload(file.url, file.originalName || 'download', `file-${file.id}`) });
       items.push({ divider: true });
       items.push({ icon: 'fa-folder-open', label: 'Move to Folder...', onClick: () => setMoveTarget({ type: 'file', item: file }) });
       items.push({
@@ -1523,7 +1602,11 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
       });
       items.push({ icon: 'fa-sliders-h', label: 'Change Status', onClick: () => { setStatusChangeTarget(file); setContextMenu(null); } });
       if (!isUrl) {
-        items.push({ icon: 'fa-file-import', label: 'Use as Transcription for...', onClick: () => { setAttachAsTranscriptionSource(file); setAttachTargetSearch(''); setContextMenu(null); } });
+        if (isAllowedTranscriptionSourceFile(file)) {
+          items.push({ icon: 'fa-file-import', label: 'Use as Transcription for...', onClick: () => { setAttachAsTranscriptionSource(file); setAttachTargetSearch(''); setContextMenu(null); } });
+        } else {
+          items.push({ icon: 'fa-file-import', label: 'Use as Transcription for... (Unsupported format)', disabled: true, onClick: () => {} });
+        }
       }
       items.push({ divider: true });
       items.push({ icon: 'fa-info-circle', label: 'Properties', onClick: () => setPropertiesFile(file) });
@@ -1542,7 +1625,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     }
 
     return items;
-  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload]);
+  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDirectDownload]);
 
   const clearFilters = () => {
     setStatusFilter('');
@@ -2432,7 +2515,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
                           </span>
                         ) : (
                           <span className="text-xs text-gray-text">
-                            {file.type ? file.type.split('/')[1]?.toUpperCase() || file.type : '--'}
+                            {getFileTypeLabel(file.type) || '--'}
                           </span>
                         )}
                       </td>
@@ -2541,19 +2624,17 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                const a = document.createElement('a');
-                                a.href = fileDownloadUrl(file.transcriptionUrl);
-                                a.download = file.transcriptionName || 'Transcription';
-                                document.body.appendChild(a);
-                                a.click();
-                                a.remove();
-                              }}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                              onClick={() => triggerDirectDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`)}
+                              disabled={downloadLoadingKey === `trans-${file.id}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                               title="Download transcription"
                             >
-                              <i className="fas fa-download text-[10px]"></i>
-                              Download
+                              {downloadLoadingKey === `trans-${file.id}` ? (
+                                <i className="fas fa-spinner fa-spin text-[10px]"></i>
+                              ) : (
+                                <i className="fas fa-download text-[10px]"></i>
+                              )}
+                              {downloadLoadingKey === `trans-${file.id}` ? 'Downloading...' : 'Download'}
                             </button>
                             <button
                               type="button"
@@ -3210,7 +3291,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               })()}
             </div>
             <div className="px-6 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between flex-shrink-0">
-              <p className="text-xs text-gray-text">Click a file to attach the selected file as its transcription.</p>
+              <p className="text-xs text-gray-text">Click a file to move the selected file as its transcription. The original source file will be removed.</p>
               <button
                 type="button"
                 onClick={() => !attachAsTranscriptionLoading && setAttachAsTranscriptionSource(null)}

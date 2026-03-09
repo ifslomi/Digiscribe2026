@@ -9,7 +9,7 @@ import { useAppToast } from '../hooks/useAppToast';
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 const ACCEPT_MEDIA = 'image/*,audio/*,video/*';
-const ACCEPT_DOCS = 'application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/plain,text/csv';
+const ACCEPT_DOCS = 'application/pdf,text/plain,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,.pdf,.txt,.doc,.docx';
 const ACCEPT_STRING = ACCEPT_MEDIA; // default; admins get ACCEPT_MEDIA + ACCEPT_DOCS
 const MAX_FILES = 10;
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB per chunk
@@ -56,18 +56,25 @@ const SERVICE_CATEGORIES = [
 /* ------------------------------------------------------------------ */
 /*  Utility helpers                                                    */
 /* ------------------------------------------------------------------ */
-function isAllowedMime(mime, role) {
-  if (!mime) return false;
-  if (mime.startsWith('image/') || mime.startsWith('audio/') || mime.startsWith('video/')) return true;
+const ADMIN_ALLOWED_DOC_MIME_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+const ADMIN_ALLOWED_DOC_EXTENSIONS = new Set(['.pdf', '.txt', '.doc', '.docx']);
+
+function isAllowedMime(mime, role, fileName = '') {
+  const normalizedMime = String(mime || '').toLowerCase();
+  const ext = fileName.includes('.') ? `.${fileName.split('.').pop().toLowerCase()}` : '';
+
+  if (!normalizedMime) {
+    return role === 'admin' && !!ext && ADMIN_ALLOWED_DOC_EXTENSIONS.has(ext);
+  }
+  if (normalizedMime.startsWith('image/') || normalizedMime.startsWith('audio/') || normalizedMime.startsWith('video/')) return true;
   if (role === 'admin') {
-    const docTypes = [
-      'application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain', 'text/csv',
-    ];
-    return docTypes.includes(mime);
+    if (ADMIN_ALLOWED_DOC_MIME_TYPES.has(normalizedMime)) return true;
+    if (ext && ADMIN_ALLOWED_DOC_EXTENSIONS.has(ext)) return true;
   }
   return false;
 }
@@ -451,8 +458,8 @@ export default function UploadPage() {
     }
 
     for (const file of fileList) {
-      if (!isAllowedMime(file.type, role)) {
-        const accepted = role === 'admin' ? 'images, audio, video, PDF, and documents' : 'images, audio, and video files only';
+      if (!isAllowedMime(file.type, role, file.name)) {
+        const accepted = role === 'admin' ? 'images, audio, video, plus PDF/TXT/DOC/DOCX documents only' : 'images, audio, and video files only';
         errors.push(`"${file.name}" is not a supported file type. Accepted: ${accepted}.`);
       } else {
         valid.push(file);
@@ -460,7 +467,7 @@ export default function UploadPage() {
     }
 
     return { valid, errors };
-  }, [files.length]);
+  }, [files.length, role]);
 
   const addFiles = useCallback((fileList) => {
     const { valid, errors } = validateFiles(Array.from(fileList));
@@ -905,7 +912,7 @@ export default function UploadPage() {
       <div className="text-center mb-6">
         <h2 className="text-lg font-semibold text-dark-text">Select Your Files</h2>
         <p className="text-sm text-gray-text mt-1">
-          Upload up to {MAX_FILES} {role === 'admin' ? 'media or document' : 'image, audio, or video'} files
+          Upload up to {MAX_FILES} {role === 'admin' ? 'media or allowed document (PDF/TXT/DOC/DOCX)' : 'image, audio, or video'} files
         </p>
       </div>
 
@@ -923,7 +930,7 @@ export default function UploadPage() {
               <li><i className="fas fa-check text-primary mr-2"></i><strong>Video:</strong> MP4, WebM, MOV, AVI, MKV, WMV, FLV, etc.</li>
               <li><i className="fas fa-triangle-exclamation text-amber-500 mr-2"></i><strong>Videos over 280 MB</strong> cannot be streamed in-browser &mdash; you&apos;ll need to download them to view.</li>
               {role === 'admin' && (
-                <li><i className="fas fa-check text-primary mr-2"></i><strong>Documents (admin):</strong> PDF, DOC/DOCX, XLS/XLSX, TXT, CSV</li>
+                <li><i className="fas fa-check text-primary mr-2"></i><strong>Documents (admin):</strong> PDF, DOC/DOCX, TXT</li>
               )}
             </ul>
           </div>

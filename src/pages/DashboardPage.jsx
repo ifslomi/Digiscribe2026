@@ -112,6 +112,20 @@ function getUrlPlatform(sourceUrl) {
   return PLATFORM_MAP.find((p) => p.pattern.test(sourceUrl)) || null;
 }
 
+function getFileTypeDisplay(type) {
+  if (!type) return '--';
+  if (type.startsWith('image/')) return 'Image';
+  if (type.startsWith('audio/')) return 'Audio';
+  if (type.startsWith('video/')) return 'Video';
+  if (type === 'application/pdf') return 'PDF';
+  if (type === 'text/plain') return 'Text';
+  if (type === 'text/csv') return 'CSV';
+  if (type.includes('spreadsheet') || type.includes('excel')) return 'Excel';
+  if (type.includes('word') || type === 'application/msword') return 'Word';
+  if (type.includes('powerpoint') || type.includes('presentation')) return 'PowerPoint';
+  return type;
+}
+
 function getPageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages = [];
@@ -146,6 +160,7 @@ export default function DashboardPage() {
   const [message, setMessage] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(null);
+  const [downloadLoadingKey, setDownloadLoadingKey] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const dashboardStateHydratedRef = useRef(false);
   const lastAnchorId = useRef(null);
@@ -798,6 +813,26 @@ export default function DashboardPage() {
     return resolved.includes('?') ? `${resolved}&download=1` : `${resolved}?download=1`;
   }, []);
 
+  const triggerDownload = useCallback((rawUrl, fileName, key) => {
+    const resolved = getDownloadUrl(rawUrl);
+    if (!resolved) return;
+
+    const loadingKey = key || `download-${Date.now()}`;
+    setDownloadLoadingKey(loadingKey);
+    try {
+      const a = document.createElement('a');
+      a.href = resolved;
+      if (fileName) a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      setTimeout(() => {
+        setDownloadLoadingKey((prev) => (prev === loadingKey ? '' : prev));
+      }, 1200);
+    }
+  }, [getDownloadUrl]);
+
   // Folder actions
   const handleCreateFolder = useCallback(async (name, parentId) => {
     await createFolder(name, parentId);
@@ -1011,12 +1046,7 @@ export default function DashboardPage() {
       const file = contextMenu.file;
       return [
         { icon: 'fa-eye', label: 'View Transcription', onClick: () => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize }) },
-        { icon: 'fa-download', label: 'Download Transcription', onClick: () => {
-          const a = document.createElement('a');
-          a.href = getDownloadUrl(file.transcriptionUrl);
-          a.download = file.transcriptionName || 'Transcription';
-          document.body.appendChild(a); a.click(); a.remove();
-        }},
+        { icon: 'fa-download', label: 'Download Transcription', onClick: () => triggerDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`) },
         { divider: true },
         { icon: 'fa-link', label: 'Copy Link', onClick: () => { navigator.clipboard.writeText(window.location.origin + file.transcriptionUrl).catch(() => {}); } },
       ];
@@ -1053,14 +1083,7 @@ export default function DashboardPage() {
         items.push({
           icon: 'fa-download',
           label: 'Download Transcription',
-          onClick: () => {
-            const a = document.createElement('a');
-            a.href = getDownloadUrl(file.transcriptionUrl);
-            a.download = file.transcriptionName || file.originalName;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-          },
+          onClick: () => triggerDownload(file.transcriptionUrl, file.transcriptionName || file.originalName, `trans-${file.id}`),
         });
       }
       items.push({ divider: true });
@@ -1079,7 +1102,7 @@ export default function DashboardPage() {
     }
 
     return items;
-  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, getDownloadUrl]);
+  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDownload]);
 
   const clearFilters = () => {
     setStatusFilter('');
@@ -1604,7 +1627,7 @@ export default function DashboardPage() {
                                   <span className="text-xs text-gray-text">{urlPlatform?.label || 'URL'}</span>
                                 ) : (
                                   <span className="text-xs text-gray-text">
-                                    {file.type ? file.type.split('/')[1]?.toUpperCase() || file.type : '--'}
+                                    {getFileTypeDisplay(file.type)}
                                   </span>
                                 )}
                               </td>
@@ -1691,19 +1714,17 @@ export default function DashboardPage() {
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        const a = document.createElement('a');
-                                        a.href = getDownloadUrl(file.transcriptionUrl);
-                                        a.download = file.transcriptionName || file.originalName;
-                                        document.body.appendChild(a);
-                                        a.click();
-                                        a.remove();
-                                      }}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                                      onClick={() => triggerDownload(file.transcriptionUrl, file.transcriptionName || file.originalName, `trans-${file.id}`)}
+                                      disabled={downloadLoadingKey === `trans-${file.id}`}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                                       title="Download transcription"
                                     >
-                                      <i className="fas fa-download text-[10px]"></i>
-                                      Download
+                                      {downloadLoadingKey === `trans-${file.id}` ? (
+                                        <i className="fas fa-spinner fa-spin text-[10px]"></i>
+                                      ) : (
+                                        <i className="fas fa-download text-[10px]"></i>
+                                      )}
+                                      {downloadLoadingKey === `trans-${file.id}` ? 'Downloading...' : 'Download'}
                                     </button>
                                   </div>
                                 </td>
@@ -1810,14 +1831,8 @@ export default function DashboardPage() {
                           folderName={statusFilter && currentFolderId === null && file.folderId ? (folderMap[file.folderId] || 'folder') : ''}
                           onOpenFolder={statusFilter && currentFolderId === null && file.folderId ? () => setCurrentFolderId(file.folderId) : undefined}
                           onViewTranscription={file.transcriptionUrl ? (f) => setDocViewerFile({ url: f.transcriptionUrl, name: f.transcriptionName || 'Transcription', type: f.transcriptionType, size: f.transcriptionSize }) : undefined}
-                          onDownloadTranscription={file.transcriptionUrl ? (f) => {
-                            const a = document.createElement('a');
-                            a.href = getDownloadUrl(f.transcriptionUrl);
-                            a.download = f.transcriptionName || f.originalName;
-                            document.body.appendChild(a);
-                            a.click();
-                            a.remove();
-                          } : undefined}
+                          onDownloadTranscription={file.transcriptionUrl ? (f) => triggerDownload(f.transcriptionUrl, f.transcriptionName || f.originalName, `trans-${f.id}`) : undefined}
+                          transcriptionDownloadLoading={downloadLoadingKey === `trans-${file.id}`}
                         />
                       </div>
                     );

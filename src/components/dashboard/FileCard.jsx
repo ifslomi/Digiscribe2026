@@ -104,7 +104,7 @@ const statusOptions = [
   { value: 'transcribed', label: 'Transcribed' },
 ];
 
-export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isSelected, onSelect, onDelete, deleteLoading, folderName, onOpenFolder, onTranscription, onViewTranscription, onDownloadTranscription }) {
+export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isSelected, onSelect, onDelete, deleteLoading, folderName, onOpenFolder, onTranscription, onViewTranscription, onDownloadTranscription, transcriptionDownloadLoading = false }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -325,12 +325,17 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
               <Button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onDownloadTranscription && onDownloadTranscription(file); }}
+                disabled={transcriptionDownloadLoading}
                 variant="ghost"
                 size="sm"
-                className="gap-1 h-auto px-2 py-1 rounded-md text-[10px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-white"
+                className="gap-1 h-auto px-2 py-1 rounded-md text-[10px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <i className="fas fa-download text-[9px]"></i>
-                Download
+                {transcriptionDownloadLoading ? (
+                  <i className="fas fa-spinner fa-spin text-[9px]"></i>
+                ) : (
+                  <i className="fas fa-download text-[9px]"></i>
+                )}
+                {transcriptionDownloadLoading ? 'Downloading...' : 'Download'}
               </Button>
             </div>
           </div>
