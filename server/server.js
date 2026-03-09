@@ -85,10 +85,24 @@ if (!IS_VERCEL) {
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
+  'http://devteam.digiscribeasiapacific.com',
+  'https://devteam.digiscribeasiapacific.com',
   ...(process.env.FRONTEND_URL
     ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
     : []),
 ].filter(Boolean);
+
+function normalizeOrigin(input) {
+  if (!input) return '';
+  try {
+    const parsed = new URL(input);
+    return `${parsed.protocol}//${parsed.host}`.toLowerCase();
+  } catch {
+    return String(input).trim().replace(/\/+$/, '').toLowerCase();
+  }
+}
+
+const allowedOriginSet = new Set(allowedOrigins.map(normalizeOrigin));
 app.use(helmet({
   crossOriginResourcePolicy: false,
   contentSecurityPolicy: false,
@@ -96,7 +110,8 @@ app.use(helmet({
 app.use(cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
+    const normalized = normalizeOrigin(origin);
+    if (allowedOriginSet.has(normalized)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
