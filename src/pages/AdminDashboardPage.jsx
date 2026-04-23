@@ -9,7 +9,6 @@ import Breadcrumbs from '../components/dashboard/Breadcrumbs';
 import CreateFolderModal from '../components/dashboard/CreateFolderModal';
 import MoveFolderModal from '../components/dashboard/MoveFolderModal';
 import FilePreviewModal from '../components/dashboard/FilePreviewModal';
-import FileNoteModal from '../components/dashboard/FileNoteModal';
 import FilePropertiesModal from '../components/dashboard/FilePropertiesModal';
 import FolderPropertiesModal from '../components/dashboard/FolderPropertiesModal';
 import ContextMenu from '../components/dashboard/ContextMenu';
@@ -222,7 +221,6 @@ function FilesTab({
   const [deleteLoading, setDeleteLoading] = useState(null);
   const [downloadLoadingKey, setDownloadLoadingKey] = useState('');
   const [previewFile, setPreviewFile] = useState(null);
-  const [noteFile, setNoteFile] = useState(null);
   const [propertiesFile, setPropertiesFile] = useState(null);
   const [propertiesFolder, setPropertiesFolder] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -883,6 +881,28 @@ function FilesTab({
     }
   }, [getIdToken]);
 
+  const handleUpdateDescription = useCallback(async (fileId, description) => {
+    const token = await getIdToken();
+    const res = await fetch(`/api/files/metadata/${fileId}/description`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ description }),
+    });
+    const raw = await res.text();
+    let data = {};
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { error: raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() };
+      }
+    }
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || `Failed to update note (${res.status}).`);
+    }
+    setPreviewFile((prev) => (prev && prev.id === fileId ? { ...prev, description: data.description ?? description } : prev));
+  }, [getIdToken]);
+
   const handleDeleteFile = useCallback(async (fileId) => {
     setDeleteLoading(fileId);
     setMessage(null);
@@ -1502,7 +1522,6 @@ function FilesTab({
     const file = contextMenu.file;
     const isUrl = file.sourceType === 'url';
     const sourceHref = file.sourceUrl || file.sourceReferenceUrl || (isUrl ? file.url : '');
-    const hasNote = !!(file.description && file.description.trim().length > 0);
     const items = [];
 
     const selCount = [...selectedIds].filter((id) => filteredIds.has(id)).length;
@@ -1511,7 +1530,7 @@ function FilesTab({
       items.push({ icon: 'fa-check-square', label: selectedIds.has(file.id) ? 'Deselect' : 'Select', onClick: () => toggleSelect(file.id) });
       items.push({ divider: true });
       items.push({ icon: 'fa-eye', label: 'Preview', onClick: () => setPreviewFile(file) });
-      items.push({ icon: 'fa-sticky-note', label: 'View Note', disabled: !hasNote, onClick: () => setNoteFile(file) });
+      items.push({ icon: 'fa-sticky-note', label: 'Add/View Note', onClick: () => setPreviewFile(file) });
       if (isUrl && sourceHref) {
         items.push({
           icon: 'fa-up-right-from-square',
@@ -2932,22 +2951,8 @@ function FilesTab({
         <FilePreviewModal
           file={previewFile}
           onClose={() => setPreviewFile(null)}
-          canEditDescription={false}
-        />
-      )}
-
-      {noteFile && (
-        <FileNoteModal
-          file={noteFile}
-          onClose={() => setNoteFile(null)}
-        />
-      )}
-
-      {/* Document Viewer Modal (transcription view) */}
-      {docViewerFile && (
-        <DocumentViewerModal
-          file={docViewerFile}
-          onClose={() => setDocViewerFile(null)}
+          canEditDescription={true}
+          onSaveDescription={handleUpdateDescription}
         />
       )}
 

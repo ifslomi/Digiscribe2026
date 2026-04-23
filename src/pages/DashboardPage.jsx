@@ -502,9 +502,17 @@ export default function DashboardPage() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ description }),
     });
-    const data = await res.json();
+    const raw = await res.text();
+    let data = {};
+    if (raw) {
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { error: raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() };
+      }
+    }
     if (!res.ok || !data.success) {
-      throw new Error(data.error || 'Failed to update note.');
+      throw new Error(data.error || `Failed to update note (${res.status}).`);
     }
     setPreviewFile((prev) => (prev && prev.id === fileId ? { ...prev, description: data.description ?? description } : prev));
   }, [getIdToken]);

@@ -4,6 +4,7 @@
  */
 const API_BASE = import.meta.env.VITE_API_BASE || '';
 const IS_DEV = import.meta.env.DEV;
+const USE_API_BASE = API_BASE && !IS_DEV && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(API_BASE);
 const ACCESS_TOKEN_KEY = 'digiscribe_access_token';
 
 function appendQueryParam(rawUrl, key, value) {
@@ -31,7 +32,7 @@ function getCachedAccessToken() {
 export function fileUrl(url) {
   if (!url) return url;
   let resolved = url;
-  if (!IS_DEV && API_BASE && typeof resolved === 'string' && resolved.startsWith('/api/')) {
+  if (USE_API_BASE && typeof resolved === 'string' && resolved.startsWith('/api/')) {
     resolved = API_BASE + resolved;
   }
 

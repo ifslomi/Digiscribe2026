@@ -155,9 +155,15 @@ router.put('/metadata/:fileId/description', verifyAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access denied.' });
     }
 
-    await docRef.update({ description: nextDescription, updatedAt: new Date() });
+    await docRef.set({ description: nextDescription, updatedAt: new Date() }, { merge: true });
     res.json({ success: true, description: nextDescription });
   } catch (err) {
+    console.error('[files/description] update failed', {
+      fileId: req.params.fileId,
+      userUid: req.user?.uid || '',
+      userRole: req.user?.role || '',
+      error: err.message,
+    });
     res.status(500).json({ success: false, error: err.message });
   }
 });

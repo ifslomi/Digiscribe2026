@@ -87,11 +87,16 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://devteam.digiscribeasiapacific.com',
   'https://devteam.digiscribeasiapacific.com',
-  ...(!IS_VERCEL ? ['file://'] : []),
+  ...(!IS_VERCEL ? ['file://', 'null'] : []),
   ...(process.env.FRONTEND_URL
     ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
     : []),
 ].filter(Boolean);
+
+const allowedOriginPatterns = [
+  /^https:\/\/[^/]+\.app\.github\.dev$/i,
+  /^https:\/\/[^/]+\.github\.dev$/i,
+];
 
 function normalizeOrigin(input) {
   if (!input) return '';
@@ -104,6 +109,11 @@ function normalizeOrigin(input) {
 }
 
 const allowedOriginSet = new Set(allowedOrigins.map(normalizeOrigin));
+function isAllowedOrigin(normalizedOrigin) {
+  if (allowedOriginSet.has(normalizedOrigin)) return true;
+  return allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+}
+
 app.use(helmet({
   crossOriginResourcePolicy: false,
   contentSecurityPolicy: false,
@@ -112,7 +122,7 @@ app.use(cors({
   origin(origin, cb) {
     if (!origin) return cb(null, true);
     const normalized = normalizeOrigin(origin);
-    if (allowedOriginSet.has(normalized)) return cb(null, true);
+    if (isAllowedOrigin(normalized)) return cb(null, true);
     return cb(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
