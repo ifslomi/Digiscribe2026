@@ -1457,6 +1457,19 @@ function FilesTab({
     }
   }, []);
 
+  const openTranscriptionPreview = useCallback((transcription) => {
+    if (!transcription?.transcriptionUrl) return;
+    setPreviewFile({
+      id: transcription.id,
+      originalName: transcription.transcriptionName || 'Transcription',
+      url: transcription.transcriptionUrl,
+      type: transcription.transcriptionType,
+      size: transcription.transcriptionSize,
+      description: transcription.description || '',
+      sourceType: 'file',
+    });
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('admin-dashboard-view-mode', viewMode);
@@ -1510,7 +1523,7 @@ function FilesTab({
     if (contextMenu.type === 'transcription') {
       const file = contextMenu.file;
       return [
-        { icon: 'fa-eye', label: 'View Transcription', onClick: () => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize }) },
+        { icon: 'fa-eye', label: 'View Transcription', onClick: () => openTranscriptionPreview(file) },
         { icon: 'fa-download', label: 'Download Transcription', onClick: () => triggerDirectDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`) },
         { divider: true },
         { icon: 'fa-link', label: 'Copy Link', onClick: () => { navigator.clipboard.writeText(window.location.origin + fileUrl(file.transcriptionUrl)).catch(() => {}); } },
@@ -1570,7 +1583,7 @@ function FilesTab({
     }
 
     return items;
-  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDirectDownload]);
+  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDirectDownload, openTranscriptionPreview]);
 
   const clearFilters = () => {
     setStatusFilter('');
@@ -2551,7 +2564,7 @@ function FilesTab({
                             </div>
                             <button
                               type="button"
-                              onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize })}
+                                      onClick={() => openTranscriptionPreview(file)}
                               className="text-[12px] font-medium text-dark-text truncate max-w-[220px] hover:text-primary transition-colors text-left"
                               title={file.transcriptionName}
                             >
@@ -2571,7 +2584,7 @@ function FilesTab({
                           <div className="flex items-center justify-center gap-1">
                             <button
                               type="button"
-                              onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize })}
+                                onClick={() => openTranscriptionPreview(file)}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-400 hover:text-primary hover:bg-primary/5 transition-colors"
                               title="View transcription"
                             >
@@ -2579,7 +2592,6 @@ function FilesTab({
                               View
                             </button>
                             <button
-                              type="button"
                               onClick={() => triggerDirectDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`)}
                               disabled={downloadLoadingKey === `trans-${file.id}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-emerald-500 hover:text-emerald-600 hover:bg-emerald-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
@@ -3188,7 +3200,7 @@ function FilesTab({
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => setDocViewerFile({ url: transcriptionTarget.transcriptionUrl, name: transcriptionTarget.transcriptionName || 'Transcription', type: transcriptionTarget.transcriptionType, size: transcriptionTarget.transcriptionSize })}
+                        onClick={() => openTranscriptionPreview(transcriptionTarget)}
                         className="w-8 h-8 rounded-lg hover:bg-emerald-100 flex items-center justify-center text-emerald-600 transition-colors"
                         title="View transcription"
                       >

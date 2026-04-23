@@ -847,6 +847,19 @@ export default function DashboardPage() {
     }
   }, [getDownloadUrl]);
 
+  const openTranscriptionPreview = useCallback((transcription) => {
+    if (!transcription?.transcriptionUrl) return;
+    setPreviewFile({
+      id: transcription.id,
+      originalName: transcription.transcriptionName || 'Transcription',
+      url: transcription.transcriptionUrl,
+      type: transcription.transcriptionType,
+      size: transcription.transcriptionSize,
+      description: transcription.description || '',
+      sourceType: 'file',
+    });
+  }, []);
+
   // Folder actions
   const handleCreateFolder = useCallback(async (name, parentId) => {
     await createFolder(name, parentId);
@@ -1059,7 +1072,7 @@ export default function DashboardPage() {
     if (contextMenu.type === 'transcription') {
       const file = contextMenu.file;
       return [
-        { icon: 'fa-eye', label: 'View Transcription', onClick: () => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize }) },
+        { icon: 'fa-eye', label: 'View Transcription', onClick: () => openTranscriptionPreview(file) },
         { icon: 'fa-download', label: 'Download Transcription', onClick: () => triggerDownload(file.transcriptionUrl, file.transcriptionName || 'Transcription', `trans-${file.id}`) },
         { divider: true },
         { icon: 'fa-link', label: 'Copy Link', onClick: () => { navigator.clipboard.writeText(window.location.origin + file.transcriptionUrl).catch(() => {}); } },
@@ -1092,7 +1105,7 @@ export default function DashboardPage() {
         items.push({
           icon: 'fa-eye',
           label: 'View Transcription',
-          onClick: () => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize }),
+          onClick: () => openTranscriptionPreview(file),
         });
         items.push({
           icon: 'fa-download',
@@ -1116,7 +1129,7 @@ export default function DashboardPage() {
     }
 
     return items;
-  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDownload]);
+  }, [contextMenu, selectedIds, filteredIds, handleBulkDownload, handleFolderDownload, triggerDownload, openTranscriptionPreview]);
 
   const clearFilters = () => {
     setStatusFilter('');
@@ -1855,7 +1868,7 @@ export default function DashboardPage() {
                           deleteLoading={deleteLoading === file.id}
                           folderName={statusFilter && currentFolderId === null && file.folderId ? (folderMap[file.folderId] || 'folder') : ''}
                           onOpenFolder={statusFilter && currentFolderId === null && file.folderId ? () => setCurrentFolderId(file.folderId) : undefined}
-                          onViewTranscription={file.transcriptionUrl ? (f) => setDocViewerFile({ url: f.transcriptionUrl, name: f.transcriptionName || 'Transcription', type: f.transcriptionType, size: f.transcriptionSize }) : undefined}
+                          onViewTranscription={file.transcriptionUrl ? openTranscriptionPreview : undefined}
                           onDownloadTranscription={file.transcriptionUrl ? (f) => triggerDownload(f.transcriptionUrl, f.transcriptionName || f.originalName, `trans-${f.id}`) : undefined}
                           transcriptionDownloadLoading={downloadLoadingKey === `trans-${file.id}`}
                         />

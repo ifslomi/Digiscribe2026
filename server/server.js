@@ -16,7 +16,7 @@ import filesRouter from './routes/files.js';
 import pipelineRouter from './routes/pipeline.js';
 import transcriptionsRouter from './routes/transcriptions.js';
 import foldersRouter from './routes/folders.js';
-import { uploadToFtp, uploadBufferToFtp, appendBufferToFtp, moveOnFtp, downloadFromFtp, streamFromFtp, ftpFileSize, deleteFromFtp } from './services/ftp.js';
+import { uploadToFtp, uploadBufferToFtp, appendBufferToFtp, moveOnFtp, downloadFromFtp, downloadBufferFromFtp, streamFromFtp, ftpFileSize, deleteFromFtp } from './services/ftp.js';
 import { resolveFolderFtpPath, computeFileFtpPath, sanitizeName } from './services/ftpPathResolver.js';
 import { startFtpSync, reconcileOnce } from './services/ftpSync.js';
 
@@ -1227,6 +1227,20 @@ app.get('/api/files/*path', async (req, res) => {
   res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mime);
+
+  // Plain-text previews are small and are commonly fetched by the browser's
+  // text preview modal. Buffering avoids FTP stream-to-response failures for
+  // these files while keeping binary assets on the streaming path.
+  const shouldBufferPreview = !isDownload && !req.headers.range && (mime.startsWith('text/') || ext === '.csv');
+  if (shouldBufferPreview) {
+    try {
+      const buffer = await downloadBufferFromFtp(normalized);
+      res.setHeader('Content-Length', buffer.length);
+      return res.status(200).send(buffer);
+    } catch {
+      return res.status(500).json({ success: false, error: 'Failed to load file.' });
+    }
+  }
 
   const rangeHeader = req.headers.range;
   if (rangeHeader) {

@@ -47,7 +47,7 @@ function getFileIcon(type) {
 
 export default function TranscriptionDetailPage() {
   const { fileId } = useParams();
-  const { user } = useAuth();
+  const { isAdmin, getIdToken } = useAuth();
   const toast = useAppToast();
   const { files, loading: filesLoading, error: filesError } = useFirestoreFiles();
   const {
@@ -68,6 +68,9 @@ export default function TranscriptionDetailPage() {
   const [hasFetchedTranscriptions, setHasFetchedTranscriptions] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState('text'); // 'text' | 'file'
   const [deliveryFile, setDeliveryFile] = useState(null);
+  const [noteValue, setNoteValue] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteMessage, setNoteMessage] = useState(null);
 
   useEffect(() => {
     if (!message) return;
@@ -111,6 +114,52 @@ export default function TranscriptionDetailPage() {
       setContent(existingTranscription.content || '');
     }
   }, [existingTranscription]);
+
+  useEffect(() => {
+    setNoteValue(file?.description || '');
+    setNoteMessage(null);
+  }, [file?.id, file?.description]);
+
+  const handleSaveNote = async () => {
+    if (!fileId) return;
+
+    const nextNote = noteValue;
+    setNoteSaving(true);
+    setNoteMessage(null);
+
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/files/metadata/${fileId}/description`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ description: nextNote }),
+      });
+
+      const raw = await res.text();
+      let data = {};
+      if (raw) {
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = { error: raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() };
+        }
+      }
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `Failed to update note (${res.status}).`);
+      }
+
+      setNoteValue(data.description ?? nextNote);
+      setNoteMessage({ type: 'success', text: 'Note saved.' });
+    } catch (err) {
+      setNoteMessage({ type: 'error', text: err.message });
+    } finally {
+      setNoteSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     if (deliveryMode === 'file') {
@@ -550,6 +599,61 @@ export default function TranscriptionDetailPage() {
                         </>
                       )}
                     </button>
+                  </div>
+
+                  {/* Shared Note */}
+                  <div className="rounded-2xl border border-gray-100 bg-amber-50/30 p-4">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-dark-text">Note</h4>
+                        <p className="text-[11px] text-gray-text mt-0.5">
+                          Shared with the file owner and shown on the transcription view.
+                        </p>
+                      </div>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={handleSaveNote}
+                          disabled={noteSaving || noteValue.trim() === (file?.description || '').trim()}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-white bg-primary hover:bg-primary-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {noteSaving ? (
+                            <i className="fas fa-spinner fa-spin text-[10px]"></i>
+                          ) : (
+                            <i className="fas fa-save text-[10px]"></i>
+                          )}
+                          Save Note
+                        </button>
+                      )}
+                    </div>
+
+                    {isAdmin ? (
+                      <textarea
+                        value={noteValue}
+                        onChange={(e) => setNoteValue(e.target.value)}
+                        placeholder="Add a note for the file owner..."
+                        maxLength={2000}
+                        rows={4}
+                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl text-sm text-dark-text placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/40 transition-all resize-y min-h-[120px]"
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-gray-100 bg-white px-4 py-3">
+                        {noteValue.trim() ? (
+                          <p className="text-sm text-dark-text whitespace-pre-wrap leading-relaxed">{noteValue}</p>
+                        ) : (
+                          <p className="text-sm text-gray-400 italic">No note provided.</p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <span className="text-[11px] text-gray-400">{noteValue.length}/2000</span>
+                      {noteMessage && (
+                        <span className={`text-[11px] ${noteMessage.type === 'success' ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {noteMessage.text}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 

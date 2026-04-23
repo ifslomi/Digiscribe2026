@@ -105,6 +105,7 @@ export default function UserTranscriptionViewPage() {
   }
 
   const t = transcription;
+  const noteText = (t?.note || t?.fileDescription || '').trim();
 
   return (
     <Layout heroContent={heroContent}>
@@ -180,6 +181,18 @@ export default function UserTranscriptionViewPage() {
               </div>
             </div>
           )}
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-6 mt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <i className="fas fa-sticky-note text-amber-500 text-sm"></i>
+              <h3 className="text-sm font-semibold text-dark-text">Note</h3>
+            </div>
+            {noteText ? (
+              <p className="text-sm text-dark-text whitespace-pre-wrap leading-relaxed">{noteText}</p>
+            ) : (
+              <p className="text-sm text-gray-400 italic">No note provided.</p>
+            )}
+          </div>
 
         </div>
       </div>

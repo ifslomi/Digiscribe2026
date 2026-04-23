@@ -198,11 +198,23 @@ router.get('/:id', verifyAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'Access denied.' });
     }
 
+    let fileDescription = '';
+    if (data.fileId) {
+      const fileDoc = await adminDb.collection('files').doc(data.fileId).get();
+      if (fileDoc.exists) {
+        fileDescription = fileDoc.data().description || '';
+      }
+    }
+
+    const note = data.description || data.note || fileDescription || '';
+
     res.json({
       success: true,
       transcription: {
         id: doc.id,
         ...data,
+        note,
+        fileDescription,
         createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
         updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
       },
