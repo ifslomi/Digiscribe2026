@@ -74,6 +74,12 @@ function getFileIconColor(type) {
   return 'text-gray-400 bg-gray-50';
 }
 
+function getUploadedByLabel(file) {
+  if (!file) return '--';
+  if (file.uploadedByAdmin) return file.uploaderEmail || 'admin@dtc.com';
+  return file.uploaderEmail || file.uploadedByEmail || '--';
+}
+
 const statusConfig = {
   pending: {
     label: 'Pending',
@@ -115,6 +121,10 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
   const iconColor = getFileIconColor(file.type);
   const iconClass = isUrl && urlPlatform ? urlPlatform.icon : `fas ${icon}`;
   const iconBgClass = isUrl && urlPlatform ? urlPlatform.color : iconColor;
+  const delegatedUploaderEmail =
+    !isAdmin && (file.uploadedByAdmin || (file.uploaderEmail && file.uploaderEmail !== file.uploadedByEmail))
+      ? getUploadedByLabel(file)
+      : '';
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -291,6 +301,12 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
               Transcribed
             </Button>
           )}
+          {delegatedUploaderEmail && (
+            <Badge variant="outline" className="gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-100" title={`Uploaded by ${delegatedUploaderEmail}`}>
+              <i className="fas fa-user-shield text-[8px] text-blue-500"></i>
+              Uploaded by {delegatedUploaderEmail}
+            </Badge>
+          )}
         </div>
 
         {/* Description */}
@@ -345,10 +361,10 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
         <div className="flex items-center justify-between pt-3 border-t border-gray-50">
           <>
           <div className="flex items-center gap-2 text-[11px] text-gray-400 min-w-0">
-            {isAdmin && file.uploadedByEmail ? (
-              <span className="flex items-center gap-1.5 truncate" title={file.uploadedByEmail}>
+            {isAdmin && getUploadedByLabel(file) ? (
+              <span className="flex items-center gap-1.5 truncate" title={getUploadedByLabel(file)}>
                 <i className="fas fa-user text-[9px] text-gray-300"></i>
-                <span className="truncate">{file.uploadedByEmail}</span>
+                <span className="truncate">{getUploadedByLabel(file)}</span>
               </span>
             ) : (
               <span className="flex items-center gap-1.5">

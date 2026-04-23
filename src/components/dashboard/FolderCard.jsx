@@ -127,10 +127,12 @@ export default function FolderCard({
               )}
               <span className="text-[11px] text-gray-400">{formatDate(folder.createdAt)}</span>
             </div>
-            {showOwner && folder.createdByEmail && (
+            {showOwner && (folder.creatorEmail || folder.createdByEmail) && (
               <div className="flex items-center gap-1.5 mt-1">
                 <i className="fas fa-user text-[9px] text-gray-300"></i>
-                <span className="text-[10px] text-gray-400 truncate">{folder.createdByEmail}</span>
+                <span className="text-[10px] text-gray-400 truncate" title={folder.creatorEmail || folder.createdByEmail}>
+                  {folder.creatorEmail || folder.createdByEmail}
+                </span>
               </div>
             )}
           </div>

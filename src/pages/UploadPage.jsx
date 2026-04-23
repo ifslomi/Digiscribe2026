@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/layout/Layout';
 import { useScrollAnimation } from '../hooks/useScrollAnimation';
@@ -361,7 +361,24 @@ export default function UploadPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const folderId = searchParams.get('folderId') || null;
-  const { getIdToken, role } = useAuth();
+  const { getIdToken, role, user } = useAuth();
+  const targetOwnerEmail = useMemo(() => {
+    const fromQuery = searchParams.get('targetOwnerEmail');
+    if (fromQuery && String(fromQuery).trim()) return String(fromQuery).trim();
+
+    if (typeof window === 'undefined') return null;
+    try {
+      const stateKey = `admin-dashboard-files-state-v1:${user?.uid || 'admin'}`;
+      const raw = window.localStorage.getItem(stateKey);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      const recovered = String(state?.selectedUserEmail || '').trim();
+      return recovered || null;
+    } catch {
+      return null;
+    }
+  }, [searchParams, user?.uid]);
+  const isTargetedUpload = Boolean(targetOwnerEmail);
   const toast = useAppToast();
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
@@ -409,8 +426,10 @@ export default function UploadPage() {
   const [result, setResult] = useState(null); // { type: 'success' | 'error', message: string }
 
   useEffect(() => {
-    document.title = 'Upload Files - DigiScribe Transcription Corp.';
-  }, []);
+    document.title = isTargetedUpload
+      ? `Upload Files to ${targetOwnerEmail} - DigiScribe Transcription Corp.`
+      : 'Upload Files - DigiScribe Transcription Corp.';
+  }, [isTargetedUpload, targetOwnerEmail]);
 
   useEffect(() => {
     if (!result?.message) return;
@@ -568,6 +587,14 @@ export default function UploadPage() {
     setProgress(0);
     setEta('');
 
+    console.log('[upload/submit]', {
+      uploadMethod,
+      targetOwnerEmail: targetOwnerEmail || '',
+      folderId: folderId || null,
+      role,
+      userEmail: user?.email || '',
+    });
+
     try {
       const token = await getIdToken();
       if (!token) throw new Error('Authentication required. Please log in again.');
@@ -653,18 +680,38 @@ export default function UploadPage() {
 
     const completeUploadWithRetry = async ({ uploadId, fileName, totalChunks, mimeType }) => {
       for (let attempt = 0; attempt <= COMPLETE_RETRIES; attempt++) {
-        const completeRes = await fetch('/api/upload/complete', {
+        const payload = {
+          uploadId,
+          fileName,
+          totalChunks,
+          mimeType,
+          description,
+          serviceCategory,
+          folderId,
+          targetOwnerEmail,
+          ownerEmail: targetOwnerEmail,
+        };
+
+        console.log('[upload/complete-request]', {
+          attempt,
+          targetOwnerEmail: targetOwnerEmail || '',
+          folderId: folderId || null,
+          fileName,
+          mimeType,
+        });
+
+        const completeUrl = targetOwnerEmail
+          ? `/api/upload/complete?targetOwnerEmail=${encodeURIComponent(targetOwnerEmail)}`
+          : '/api/upload/complete';
+
+        const completeRes = await fetch(completeUrl, {
           method: 'POST',
-          headers: { ...authHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            uploadId,
-            fileName,
-            totalChunks,
-            mimeType,
-            description,
-            serviceCategory,
-            folderId,
-          }),
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+            ...(targetOwnerEmail ? { 'x-target-owner-email': targetOwnerEmail } : {}),
+          },
+          body: JSON.stringify(payload),
           signal,
         });
 
@@ -754,10 +801,32 @@ export default function UploadPage() {
       setProgress(Math.round(((i) / urls.length) * 100));
 
       try {
-        const res = await fetch('/api/upload/url', {
+        console.log('[upload/url-request]', {
+          index: i,
+          targetOwnerEmail: targetOwnerEmail || '',
+          folderId: folderId || null,
+          url: urls[i],
+        });
+        const uploadUrl = targetOwnerEmail
+          ? `/api/upload/url?targetOwnerEmail=${encodeURIComponent(targetOwnerEmail)}`
+          : '/api/upload/url';
+
+        const res = await fetch(uploadUrl, {
           method: 'POST',
-          headers: { ...authHeaders, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: urls[i], customName: urlNames[i] || '', description, serviceCategory, folderId }),
+          headers: {
+            ...authHeaders,
+            'Content-Type': 'application/json',
+            ...(targetOwnerEmail ? { 'x-target-owner-email': targetOwnerEmail } : {}),
+          },
+          body: JSON.stringify({
+            url: urls[i],
+            customName: urlNames[i] || '',
+            description,
+            serviceCategory,
+            folderId,
+            targetOwnerEmail,
+            ownerEmail: targetOwnerEmail,
+          }),
           signal,
         });
         const raw = await res.text();
@@ -1272,7 +1341,9 @@ export default function UploadPage() {
         <div className="text-center mb-6">
           <h2 className="text-lg font-semibold text-dark-text">Review & Submit</h2>
           <p className="text-sm text-gray-text mt-1">
-            Please review your upload details before submitting
+            {isTargetedUpload
+              ? `Please review the upload details for ${targetOwnerEmail} before submitting.`
+              : 'Please review your upload details before submitting'}
           </p>
         </div>
 
@@ -1458,7 +1529,7 @@ export default function UploadPage() {
               className="btn-gradient text-white px-10 py-3.5 rounded-xl text-sm font-semibold shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all duration-300 flex items-center gap-2"
             >
               <i className="fas fa-upload"></i>
-              <span>Submit Upload</span>
+              <span>{isTargetedUpload ? 'Upload File to This User' : 'Submit Upload'}</span>
             </button>
           </div>
         )}
@@ -1554,11 +1625,19 @@ export default function UploadPage() {
             Back
           </button>
           <h1 className="text-2xl md:text-3xl font-semibold gradient-text">
-            Upload Files
+            {isTargetedUpload ? 'Upload Files to This User' : 'Upload Files'}
           </h1>
           <p className="text-sm text-gray-text mt-1">
-            Upload your files for transcription in a few simple steps.
+            {isTargetedUpload
+              ? `Upload these files directly to ${targetOwnerEmail}'s folder.`
+              : 'Upload your files for transcription in a few simple steps.'}
           </p>
+          {isTargetedUpload && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-medium text-sky-700">
+              <i className="fas fa-user text-[10px]"></i>
+              Target user: {targetOwnerEmail}
+            </div>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-100">

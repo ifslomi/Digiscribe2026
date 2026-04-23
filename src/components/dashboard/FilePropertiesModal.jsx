@@ -41,6 +41,12 @@ function formatDate(dateStr) {
   }
 }
 
+function getUploadedByLabel(file) {
+  if (!file) return '--';
+  if (file.uploadedByAdmin) return file.uploaderEmail || 'admin@dtc.com';
+  return file.uploaderEmail || file.uploadedByEmail || '--';
+}
+
 export default function FilePropertiesModal({ file, onClose }) {
   if (!file) return null;
 
@@ -52,7 +58,11 @@ export default function FilePropertiesModal({ file, onClose }) {
     { label: 'Size', value: formatSize(file.size) },
     { label: 'Status', value: file.status || '--' },
     { label: 'Category', value: file.serviceCategory || '--' },
-    { label: 'Uploaded By', value: file.uploadedByEmail || '--' },
+    { label: 'Uploaded By', value: getUploadedByLabel(file) },
+    (file.uploadedByAdmin || (file.uploaderEmail && file.uploadedByEmail && file.uploaderEmail !== file.uploadedByEmail)) && {
+      label: 'Owned By',
+      value: file.uploadedByEmail,
+    },
     { label: 'Upload Date', value: formatDate(file.uploadedAt) },
     { label: 'Source', value: file.sourceType === 'url' ? 'URL Upload' : 'File Upload' },
     file.sourceUrl && { label: 'Source URL', value: file.sourceUrl },

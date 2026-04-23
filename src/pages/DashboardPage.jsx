@@ -126,6 +126,12 @@ function getFileTypeDisplay(type) {
   return type;
 }
 
+function getUploadedByLabel(file) {
+  if (!file) return '--';
+  if (file.uploadedByAdmin) return file.uploaderEmail || 'admin@dtc.com';
+  return file.uploaderEmail || file.uploadedByEmail || '--';
+}
+
 function getPageNumbers(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
   const pages = [];
@@ -1605,6 +1611,15 @@ export default function DashboardPage() {
                                     >
                                       {file.originalName}
                                     </span>
+                                    {(file.uploadedByAdmin || (file.uploaderEmail && file.uploadedByEmail && file.uploaderEmail !== file.uploadedByEmail)) && (
+                                      <span
+                                        className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 border border-sky-100"
+                                        title={`Uploaded by ${getUploadedByLabel(file)}`}
+                                      >
+                                        <i className="fas fa-user-shield text-[8px] text-sky-500"></i>
+                                        Uploaded by {getUploadedByLabel(file)}
+                                      </span>
+                                    )}
                                     {file.serviceCategory && (
                                       <span className="text-[10px] text-indigo-500">{file.serviceCategory}</span>
                                     )}
@@ -1638,10 +1653,12 @@ export default function DashboardPage() {
                                 </span>
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className="text-sm text-gray-text">{formatRelativeDate(file.uploadedAt)}</span>
+                                <span className="text-sm text-gray-text" title={getUploadedByLabel(file)}>
+                                  {getUploadedByLabel(file)}
+                                </span>
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className="text-sm text-gray-text">{file.size > 0 ? formatSize(file.size) : '--'}</span>
+                                <span className="text-sm text-gray-text">{formatRelativeDate(file.uploadedAt)}</span>
                               </td>
                               <td className="px-4 py-3.5 text-center">
                                 <div className="flex items-center justify-center gap-1">

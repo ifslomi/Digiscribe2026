@@ -111,7 +111,9 @@ export default function FolderRow({
       </td>
       {showUploadedBy && (
         <td className="px-4 py-3.5">
-          <span className="text-sm text-gray-text">{folder.createdByEmail || '--'}</span>
+          <span className="text-sm text-gray-text" title={folder.creatorEmail || folder.createdByEmail || '--'}>
+            {folder.creatorEmail || folder.createdByEmail || '--'}
+          </span>
         </td>
       )}
       <td className="px-4 py-3.5">

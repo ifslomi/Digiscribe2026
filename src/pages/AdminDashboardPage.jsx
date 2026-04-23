@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { fileUrl, fileDownloadUrl } from '../lib/fileUrl';
 import Layout from '../components/layout/Layout';
 import FolderRow from '../components/dashboard/FolderRow';
@@ -85,6 +85,10 @@ function getAdminDashboardStateKey(userId) {
   return `${ADMIN_DASHBOARD_STATE_PREFIX}:${userId || 'admin'}`;
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
 function formatSize(bytes) {
   if (!bytes) return '--';
   if (bytes < 1024) return `${bytes} B`;
@@ -103,6 +107,11 @@ function formatDate(dateStr) {
   } catch {
     return '--';
   }
+}
+
+function getUploadedByLabel(file) {
+  if (!file) return '--';
+  return file.uploaderEmail || file.uploadedByEmail || '--';
 }
 
 function formatRelativeDate(dateString) {
@@ -178,7 +187,16 @@ function getUrlPlatform(sourceUrl) {
 
 /* ─────────────────────────── Files Tab ─────────────────────────── */
 
-function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoading, folderActions, refetchFolders }) {
+function FilesTab({
+  allFiles,
+  allFolders,
+  filesLoading,
+  filesError,
+  foldersLoading,
+  folderActions,
+  refetchFolders,
+  onScopeChange,
+}) {
   const { user, getIdToken } = useAuth();
   const toast = useAppToast();
   const { createFolder, renameFolder, moveFolder, deleteFolder, moveFileToFolder } = folderActions;
@@ -287,6 +305,15 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   }, [user?.uid]);
 
   useEffect(() => {
+    if (typeof onScopeChange !== 'function') return;
+    onScopeChange({
+      selectedUserEmail,
+      currentFolderId,
+      rootViewMode,
+    });
+  }, [selectedUserEmail, currentFolderId, rootViewMode, onScopeChange]);
+
+  useEffect(() => {
     if (typeof window === 'undefined' || !user?.uid || dashboardStateHydratedRef.current) return;
     dashboardStateHydratedRef.current = true;
 
@@ -333,6 +360,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
     };
     try {
       window.localStorage.setItem(getAdminDashboardStateKey(user.uid), JSON.stringify(state));
+      window.dispatchEvent(new CustomEvent('admin-dashboard-files-state-changed', { detail: state }));
     } catch {
       // Ignore storage quota/private mode errors
     }
@@ -395,12 +423,14 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   // Effective data scoped by selected user
   const effectiveFiles = useMemo(() => {
     if (!selectedUserEmail) return allFiles;
-    return allFiles.filter((f) => f.uploadedByEmail === selectedUserEmail);
+    const selected = normalizeEmail(selectedUserEmail);
+    return allFiles.filter((f) => normalizeEmail(f.uploadedByEmail) === selected);
   }, [allFiles, selectedUserEmail]);
 
   const effectiveFolders = useMemo(() => {
     if (!selectedUserEmail) return allFolders;
-    return allFolders.filter((f) => f.createdByEmail === selectedUserEmail);
+    const selected = normalizeEmail(selectedUserEmail);
+    return allFolders.filter((f) => normalizeEmail(f.createdByEmail) === selected);
   }, [allFolders, selectedUserEmail]);
 
   // Compute counts for top status cards
@@ -489,19 +519,23 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
   const virtualUserFolders = useMemo(() => {
     const userMap = {};
     for (const file of allFiles) {
-      const email = file.uploadedByEmail || 'unknown';
-      if (!userMap[email]) userMap[email] = { email, fileCount: 0, folderCount: 0, totalSize: 0, latestUpload: null };
+      const rawEmail = file.uploadedByEmail || 'unknown';
+      const email = normalizeEmail(rawEmail) || 'unknown';
+      if (!userMap[email]) userMap[email] = { email: rawEmail, fileCount: 0, folderCount: 0, totalSize: 0, latestUpload: null };
       userMap[email].fileCount++;
       userMap[email].totalSize += file.size || 0;
       const d = file.uploadedAt ? new Date(file.uploadedAt) : null;
       if (d && (!userMap[email].latestUpload || d > userMap[email].latestUpload)) userMap[email].latestUpload = d;
     }
     for (const folder of allFolders) {
-      const email = folder.createdByEmail || 'unknown';
-      if (!userMap[email]) userMap[email] = { email, fileCount: 0, folderCount: 0, totalSize: 0, latestUpload: null };
+      const rawEmail = folder.createdByEmail || 'unknown';
+      const email = normalizeEmail(rawEmail) || 'unknown';
+      if (!userMap[email]) userMap[email] = { email: rawEmail, fileCount: 0, folderCount: 0, totalSize: 0, latestUpload: null };
       userMap[email].folderCount++;
     }
-    return Object.values(userMap).sort((a, b) => a.email.localeCompare(b.email));
+    return Object.values(userMap)
+      .map((entry) => ({ ...entry, email: normalizeEmail(entry.email) || entry.email }))
+      .sort((a, b) => a.email.localeCompare(b.email));
   }, [allFiles, allFolders]);
 
   // Global overview stats for admin root
@@ -1016,11 +1050,16 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
 
   // Folder action handlers
   const handleCreateFolder = useCallback(async (name, parentId) => {
-    await createFolder(name, parentId);
+    console.log('[admin/create-folder-click]', {
+      selectedUserEmail: selectedUserEmail || '',
+      parentId: parentId || null,
+      folderName: name,
+    });
+    await createFolder(name, parentId, selectedUserEmail || null);
     await refetchFolders();
     setMessage({ type: 'success', text: `Folder "${name}" created.` });
     setTimeout(() => setMessage(null), 3000);
-  }, [createFolder, refetchFolders]);
+  }, [createFolder, refetchFolders, selectedUserEmail]);
 
   const handleRenameFolder = useCallback(async (folderId, newName) => {
     try {
@@ -1526,6 +1565,17 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
 
   const hasActiveFilters = statusFilter || serviceFilter.length > 0 || searchQuery || userFilter || (isInsideFolder && (dateFrom || dateTo || typeFilter));
 
+  const uploadLink = useMemo(() => {
+    const params = new URLSearchParams();
+    if (currentFolderId) params.set('folderId', currentFolderId);
+    if (selectedUserEmail) params.set('targetOwnerEmail', selectedUserEmail);
+    const query = params.toString();
+    return query ? `/upload?${query}` : '/upload';
+  }, [currentFolderId, selectedUserEmail]);
+
+  const createFolderButtonLabel = selectedUserEmail ? 'Create Folder to this User' : 'New Folder';
+  const uploadButtonLabel = selectedUserEmail ? 'Upload File to this User' : 'Upload Files';
+
   // Folder-level date change handler
   const handleDateRangeChange = useCallback((from, to) => {
     setDateFrom(from);
@@ -1685,7 +1735,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors whitespace-nowrap border border-indigo-200"
             >
               <i className="fas fa-folder-plus text-xs"></i>
-              New Folder
+              {createFolderButtonLabel}
             </button>
             {hasActiveFilters && (
               <span className="text-xs text-gray-400 ml-auto">
@@ -1755,7 +1805,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors whitespace-nowrap border border-indigo-200"
             >
               <i className="fas fa-folder-plus text-xs"></i>
-              New Folder
+              {createFolderButtonLabel}
             </button>
 
             {hasActiveFilters && (
@@ -2199,14 +2249,14 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
               className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
             >
               <i className="fas fa-folder-plus text-xs"></i>
-              Create Folder
+              {createFolderButtonLabel}
             </button>
             <Link
-              to={currentFolderId ? `/upload?folderId=${currentFolderId}` : '/upload'}
+              to={uploadLink}
               className="inline-flex items-center gap-2 btn-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all"
             >
               <i className="fas fa-plus text-xs"></i>
-              Upload Files
+              {uploadButtonLabel}
             </Link>
           </div>
         </div>
@@ -2425,7 +2475,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
                         )}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="text-sm text-gray-text">{file.uploadedByEmail || '--'}</span>
+                        <span className="text-sm text-gray-text" title={getUploadedByLabel(file)}>{getUploadedByLabel(file)}</span>
                       </td>
                       <td className="px-4 py-3.5">
                         <span className="text-sm text-gray-text">{formatRelativeDate(file.uploadedAt)}</span>
@@ -2623,7 +2673,7 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
                         <p className="text-[11px] text-gray-400 truncate mt-0.5">{file.description}</p>
                       )}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-400 mt-1.5">
-                        <span><i className="fas fa-user mr-1 text-[9px]"></i>{file.uploadedByEmail || '--'}</span>
+                        <span title={getUploadedByLabel(file)}><i className="fas fa-user mr-1 text-[9px]"></i>{getUploadedByLabel(file)}</span>
                         <span>{formatSize(file.size)}</span>
                         <span>{formatRelativeDate(file.uploadedAt)}</span>
                         {urlPlatform && (
@@ -2918,6 +2968,9 @@ function FilesTab({ allFiles, allFolders, filesLoading, filesError, foldersLoadi
         onClose={() => setShowCreateFolder(false)}
         onCreateFolder={handleCreateFolder}
         parentFolderId={currentFolderId}
+        title={selectedUserEmail ? 'Create Folder to this User' : 'New Folder'}
+        subtitle={selectedUserEmail ? `Create a new folder for ${selectedUserEmail}.` : 'Create a new folder to organize your files'}
+        submitLabel={selectedUserEmail ? 'Create Folder to this User' : 'Create Folder'}
       />
 
       {/* Move Modal */}
@@ -3417,9 +3470,11 @@ function TranscriptionsTab() {
 
 export default function AdminDashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const toast = useAppToast();
   const [activeTab, setActiveTab] = useState('files');
   const [userMessage, setUserMessage] = useState(null);
+  const [adminUploadScope, setAdminUploadScope] = useState({ selectedUserEmail: '', currentFolderId: null });
   const [createUserOpen, setCreateUserOpen] = useState(false);
 
   const { files: allFiles, loading: filesLoading, error: filesError } = useFirestoreFiles();
@@ -3498,6 +3553,24 @@ export default function AdminDashboardPage() {
     }
   };
 
+  const handleUploadClick = useCallback(() => {
+    const params = new URLSearchParams();
+
+    const selectedUserEmail = String(adminUploadScope.selectedUserEmail || '').trim();
+    const currentFolderId = String(adminUploadScope.currentFolderId || '').trim();
+    if (selectedUserEmail) params.set('targetOwnerEmail', selectedUserEmail);
+    if (currentFolderId) params.set('folderId', currentFolderId);
+
+    console.log('[admin/upload-click]', {
+      selectedUserEmail,
+      currentFolderId,
+      targetUrl: params.toString() ? `/upload?${params.toString()}` : '/upload',
+    });
+
+    const query = params.toString();
+    navigate(query ? `/upload?${query}` : '/upload');
+  }, [adminUploadScope.currentFolderId, adminUploadScope.selectedUserEmail, navigate]);
+
   const heroContent = (
     <div className="relative z-10 py-10 pb-6">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -3529,13 +3602,14 @@ export default function AdminDashboardPage() {
               ))}
             </div>
 
-            <Link
-              to="/upload"
+            <button
+              type="button"
+              onClick={handleUploadClick}
               className="btn-gradient text-white px-5 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all inline-flex items-center gap-2"
             >
               <i className="fas fa-plus text-xs"></i>
-              Upload
-            </Link>
+              {adminUploadScope.selectedUserEmail ? 'Upload File to this User' : 'Upload'}
+            </button>
           </div>
         </div>
       </div>
@@ -3555,6 +3629,7 @@ export default function AdminDashboardPage() {
               foldersLoading={foldersLoading}
               folderActions={folderActions}
               refetchFolders={refetchFolders}
+              onScopeChange={setAdminUploadScope}
             />
           )}
           {activeTab === 'users' && (

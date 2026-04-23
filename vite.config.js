@@ -9,6 +9,7 @@ loadEnv()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const uploadsDir = path.join(__dirname, 'server', 'uploads')
+const devApiOrigin = `http://localhost:${process.env.PORT || 3001}`
 
 // Ensure uploads directory exists
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true })
@@ -118,27 +119,24 @@ function fileServerPlugin() {
 }
 
 // https://vite.dev/config/
-const serverPort = process.env.PORT || 3001
-const serverOrigin = process.env.VITE_API_BASE || `http://localhost:${serverPort}`
-
 export default defineConfig({
   plugins: [fileServerPlugin(), react()],
   server: {
     proxy: {
-      '/api/upload': serverOrigin,
-      '/api/admin': serverOrigin,
-      '/api/quote': serverOrigin,
-      '/api/files': serverOrigin,
-      '/api/files/metadata': serverOrigin,
-      '/api/files/bulk-download': serverOrigin,
-      '/api/files/bulk-delete': serverOrigin,
-      '/api/files/bulk-move': serverOrigin,
-      '/api/files/bulk-status': serverOrigin,
-      '/api/files/download-folder': serverOrigin,
-      '/api/pipeline': serverOrigin,
-      '/api/folders': serverOrigin,
-      '/api/lgus': serverOrigin,
-      '/api/transcriptions': serverOrigin,
+      '/api/upload': devApiOrigin,
+      '/api/admin': devApiOrigin,
+      '/api/quote': devApiOrigin,
+      '/api/files': devApiOrigin,
+      '/api/files/metadata': devApiOrigin,
+      '/api/files/bulk-download': devApiOrigin,
+      '/api/files/bulk-delete': devApiOrigin,
+      '/api/files/bulk-move': devApiOrigin,
+      '/api/files/bulk-status': devApiOrigin,
+      '/api/files/download-folder': devApiOrigin,
+      '/api/pipeline': devApiOrigin,
+      '/api/folders': devApiOrigin,
+      '/api/lgus': devApiOrigin,
+      '/api/transcriptions': devApiOrigin,
     },
   },
 })

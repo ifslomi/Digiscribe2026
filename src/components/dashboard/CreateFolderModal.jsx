@@ -3,7 +3,15 @@ import { createPortal } from 'react-dom';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 
-export default function CreateFolderModal({ isOpen, onClose, onCreateFolder, parentFolderId }) {
+export default function CreateFolderModal({
+  isOpen,
+  onClose,
+  onCreateFolder,
+  parentFolderId,
+  title = 'New Folder',
+  subtitle = 'Create a new folder to organize your files',
+  submitLabel = 'Create Folder',
+}) {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -58,8 +66,8 @@ export default function CreateFolderModal({ isOpen, onClose, onCreateFolder, par
             <i className="fas fa-folder-plus text-indigo-500"></i>
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-dark-text">New Folder</h2>
-            <p className="text-xs text-gray-text">Create a new folder to organize your files</p>
+            <h2 className="text-lg font-semibold text-dark-text">{title}</h2>
+            <p className="text-xs text-gray-text">{subtitle}</p>
           </div>
           <Button
             type="button"
@@ -113,7 +121,7 @@ export default function CreateFolderModal({ isOpen, onClose, onCreateFolder, par
               ) : (
                 <i className="fas fa-plus text-xs"></i>
               )}
-              Create Folder
+              {submitLabel}
             </Button>
           </div>
         </form>

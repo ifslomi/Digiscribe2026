@@ -87,6 +87,7 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://devteam.digiscribeasiapacific.com',
   'https://devteam.digiscribeasiapacific.com',
+  ...(!IS_VERCEL ? ['file://'] : []),
   ...(process.env.FRONTEND_URL
     ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
     : []),
@@ -194,6 +195,73 @@ function getAssemblingRemotePath(uploadId) {
   return `_assembling/${safeUploadId}.bin`;
 }
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function resolveUploadOwner({ req, folderId, targetOwnerEmail }) {
+  const owner = {
+    uid: req.user.uid,
+    email: req.user.email || '',
+  };
+
+  console.log('[upload/owner] start', {
+    actorEmail: req.user.email || '',
+    actorUid: req.user.uid,
+    role: req.user.role,
+    folderId: folderId || null,
+    targetOwnerEmail: targetOwnerEmail || '',
+  });
+
+  let folderData = null;
+  if (folderId) {
+    const folderDoc = await adminDb.collection('folders').doc(folderId).get();
+    if (!folderDoc.exists) {
+      const err = new Error('Folder not found.');
+      err.statusCode = 404;
+      throw err;
+    }
+    folderData = folderDoc.data();
+
+    if (req.user.role !== 'admin' && folderData.createdBy !== req.user.uid) {
+      const err = new Error('Access denied to target folder.');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    if (folderData.createdBy) owner.uid = folderData.createdBy;
+    if (folderData.createdByEmail) owner.email = folderData.createdByEmail;
+  }
+
+  if (req.user.role !== 'admin') return owner;
+
+  const normalizedTarget = normalizeEmail(targetOwnerEmail);
+  if (!normalizedTarget) return owner;
+
+  if (folderData?.createdByEmail) {
+    if (normalizeEmail(folderData.createdByEmail) !== normalizedTarget) {
+      const err = new Error('Target user does not match folder owner.');
+      err.statusCode = 400;
+      throw err;
+    }
+    return owner;
+  }
+
+  try {
+    const targetUser = await adminAuth.getUserByEmail(normalizedTarget);
+    const resolved = {
+      uid: targetUser.uid,
+      email: targetUser.email || normalizedTarget,
+    };
+    console.log('[upload/owner] resolved target user', resolved);
+    return resolved;
+  } catch {
+    const err = new Error('Target user not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+}
+
 const EXT_TO_MIME = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.jfif': 'image/jpeg',
   '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
@@ -288,7 +356,28 @@ app.post('/api/upload/chunk', verifyAuth, chunkUpload.single('chunk'), async (re
 // POST /api/upload/complete - assemble chunks into final file (auth required)
 app.post('/api/upload/complete', verifyAuth, async (req, res) => {
   try {
-    const { uploadId, fileName, totalChunks, mimeType, description, serviceCategory, folderId } = req.body;
+    const {
+      uploadId,
+      fileName,
+      totalChunks,
+      mimeType,
+      description,
+      serviceCategory,
+      folderId,
+    } = req.body;
+    const targetOwnerEmail = req.body?.targetOwnerEmail
+      || req.body?.ownerEmail
+      || req.query?.targetOwnerEmail
+      || req.headers['x-target-owner-email']
+      || '';
+
+    console.log('[upload/complete] request source', {
+      bodyTargetOwnerEmail: req.body?.targetOwnerEmail || '',
+      bodyOwnerEmail: req.body?.ownerEmail || '',
+      queryTargetOwnerEmail: req.query?.targetOwnerEmail || '',
+      headerTargetOwnerEmail: req.headers['x-target-owner-email'] || '',
+      folderId: req.body?.folderId || null,
+    });
 
     console.log('[upload/complete] Received fileName:', fileName);
 
@@ -300,12 +389,29 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
       return res.status(400).json({ success: false, error: 'File type not allowed. Admin uploads support media plus PDF/TXT/DOC/DOCX documents only.' });
     }
 
+    let owner;
+    try {
+      owner = await resolveUploadOwner({ req, folderId, targetOwnerEmail });
+    } catch (ownerErr) {
+      return res.status(ownerErr.statusCode || 400).json({ success: false, error: ownerErr.message });
+    }
+
+    console.log('[upload/complete] resolved upload context', {
+      actorEmail: req.user.email || '',
+      actorUid: req.user.uid,
+      role: req.user.role,
+      targetOwnerEmail,
+      folderId: folderId || null,
+      ownerEmail: owner.email || '',
+      ownerUid: owner.uid,
+    });
+
     // Build filename: {Service}_{timestamp}-{filename}
     const prefix = buildFilePrefix(serviceCategory);
     const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const finalName = `${prefix}_${Date.now()}-${safeName}`;
     // Per-user directory: {email}/{filename}
-    const emailDir = (req.user.email || 'unknown').split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
+    const emailDir = (owner.email || 'unknown').split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_') || 'unknown';
     const defaultStoragePath = `${emailDir}/${finalName}`;
 
     // If uploading into a folder, place the file inside the folder FTP path (already includes email dir)
@@ -316,9 +422,20 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
         if (folderFtpPath) {
           storagePath = `${folderFtpPath}/${finalName}`;
         }
+        console.log('[upload/complete] ftp path resolved', {
+          folderId,
+          folderFtpPath: folderFtpPath || '',
+          defaultStoragePath,
+          storagePath,
+        });
       } catch (e) {
         console.warn('[upload/complete] folder path resolution failed, using default path:', e.message);
       }
+    } else {
+      console.log('[upload/complete] ftp path resolved without folder', {
+        defaultStoragePath,
+        storagePath,
+      });
     }
     let finalSize = 0;
 
@@ -408,8 +525,11 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
         size: finalSize,
         type: mimeType,
         fileCategory: getFileCategory(mimeType),
-        uploadedBy: req.user.uid,
-        uploadedByEmail: req.user.email || '',
+        uploadedBy: owner.uid,
+        uploadedByEmail: owner.email,
+        uploaderUid: req.user.uid,
+        uploaderEmail: req.user.email || owner.email || '',
+        uploadedByAdmin: req.user.role === 'admin' && owner.uid !== req.user.uid,
         uploadedAt: new Date(),
         status: 'pending',
         description: description || '',
@@ -420,7 +540,13 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
         url: `/api/files/${encodeStorageUrl(storagePath)}`,
       });
       fileId = docRef.id;
-      console.log('[upload/complete] Firestore doc created:', fileId);
+      console.log('[upload/complete] Firestore doc created', {
+        fileId,
+        storagePath,
+        uploadedByEmail: owner.email || '',
+        uploaderEmail: req.user.email || owner.email || '',
+        uploadedByAdmin: req.user.role === 'admin' && owner.uid !== req.user.uid,
+      });
     } else {
       console.error('[upload/complete] adminDb is null — metadata not saved for:', finalName);
     }
@@ -439,6 +565,19 @@ app.post('/api/upload/complete', verifyAuth, async (req, res) => {
 // POST /api/upload/url - Upload from URL (auth required)
 app.post('/api/upload/url', verifyAuth, async (req, res) => {
   const { url, customName, description, serviceCategory, folderId } = req.body;
+  const targetOwnerEmail = req.body?.targetOwnerEmail
+    || req.body?.ownerEmail
+    || req.query?.targetOwnerEmail
+    || req.headers['x-target-owner-email']
+    || '';
+
+  console.log('[upload/url] request source', {
+    bodyTargetOwnerEmail: req.body?.targetOwnerEmail || '',
+    bodyOwnerEmail: req.body?.ownerEmail || '',
+    queryTargetOwnerEmail: req.query?.targetOwnerEmail || '',
+    headerTargetOwnerEmail: req.headers['x-target-owner-email'] || '',
+    folderId: req.body?.folderId || null,
+  });
 
   console.log('[upload/url] Received customName:', customName);
 
@@ -467,6 +606,23 @@ app.post('/api/upload/url', verifyAuth, async (req, res) => {
   }
 
   try {
+    let owner;
+    try {
+      owner = await resolveUploadOwner({ req, folderId, targetOwnerEmail });
+    } catch (ownerErr) {
+      return res.status(ownerErr.statusCode || 400).json({ success: false, error: ownerErr.message });
+    }
+
+    console.log('[upload/url] resolved upload context', {
+      actorEmail: req.user.email || '',
+      actorUid: req.user.uid,
+      role: req.user.role,
+      targetOwnerEmail,
+      folderId: folderId || null,
+      ownerEmail: owner.email || '',
+      ownerUid: owner.uid,
+    });
+
     const effectiveUrl = await normalizeUrlUploadTarget(normalizedInputUrl);
     const sourceUrlForMetadata = getSourceUrlForMetadata(normalizedInputUrl, effectiveUrl);
 
@@ -494,8 +650,11 @@ app.post('/api/upload/url', verifyAuth, async (req, res) => {
         size: 0,
         type: 'application/x-url',
         fileCategory: 'URL',
-        uploadedBy: req.user.uid,
-        uploadedByEmail: req.user.email || '',
+        uploadedBy: owner.uid,
+        uploadedByEmail: owner.email,
+        uploaderUid: req.user.uid,
+        uploaderEmail: req.user.email || owner.email || '',
+        uploadedByAdmin: req.user.role === 'admin' && owner.uid !== req.user.uid,
         uploadedAt: new Date(),
         status: 'pending',
         description: normalizedDescription,
@@ -506,6 +665,13 @@ app.post('/api/upload/url', verifyAuth, async (req, res) => {
         url: sourceUrlForMetadata,
       });
       fileId = docRef.id;
+      console.log('[upload/url] Firestore doc created', {
+        fileId,
+        sourceUrl: sourceUrlForMetadata,
+        uploadedByEmail: owner.email || '',
+        uploaderEmail: req.user.email || owner.email || '',
+        uploadedByAdmin: req.user.role === 'admin' && owner.uid !== req.user.uid,
+      });
     }
 
     res.json({

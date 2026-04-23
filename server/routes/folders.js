@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { adminDb } from '../firebaseAdmin.js';
+import { adminAuth, adminDb } from '../firebaseAdmin.js';
 import { verifyAuth } from '../middleware/authMiddleware.js';
 import { mkdirOnFtp, renameDirOnFtp, removeDirOnFtp, moveOnFtp } from '../services/ftp.js';
 import {
@@ -11,32 +11,122 @@ import {
 
 const router = Router();
 
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function resolveOwnerForFolderCreate({ req, parentData, targetOwnerEmail }) {
+  const fallbackEmail = req.user.email || '';
+  const owner = {
+    uid: req.user.uid,
+    email: fallbackEmail,
+  };
+
+  console.log('[folders/create-owner] start', {
+    actorEmail: req.user.email || '',
+    actorUid: req.user.uid,
+    role: req.user.role,
+    targetOwnerEmail: targetOwnerEmail || '',
+    parentOwnerEmail: parentData?.createdByEmail || '',
+  });
+
+  if (parentData?.createdBy) {
+    owner.uid = parentData.createdBy;
+    owner.email = parentData.createdByEmail || owner.email;
+  }
+
+  if (req.user.role !== 'admin') return owner;
+
+  const normalizedTarget = normalizeEmail(targetOwnerEmail);
+  if (!normalizedTarget) return owner;
+
+  if (parentData?.createdByEmail) {
+    if (normalizeEmail(parentData.createdByEmail) !== normalizedTarget) {
+      throw new Error('Target user does not match parent folder owner.');
+    }
+    return owner;
+  }
+
+  try {
+    const targetUser = await adminAuth.getUserByEmail(normalizedTarget);
+    const resolved = {
+      uid: targetUser.uid,
+      email: targetUser.email || normalizedTarget,
+    };
+    console.log('[folders/create-owner] resolved target user', resolved);
+    return resolved;
+  } catch {
+    const err = new Error('Target user not found.');
+    err.statusCode = 404;
+    throw err;
+  }
+}
+
 // POST /api/folders - Create a folder
 router.post('/', verifyAuth, async (req, res) => {
   const { name, parentId } = req.body;
+  const targetOwnerEmail = req.body?.targetOwnerEmail
+    || req.body?.ownerEmail
+    || req.query?.targetOwnerEmail
+    || req.headers['x-target-owner-email']
+    || '';
+
+  console.log('[folders/create] request source', {
+    bodyTargetOwnerEmail: req.body?.targetOwnerEmail || '',
+    bodyOwnerEmail: req.body?.ownerEmail || '',
+    queryTargetOwnerEmail: req.query?.targetOwnerEmail || '',
+    headerTargetOwnerEmail: req.headers['x-target-owner-email'] || '',
+    parentId: parentId || null,
+  });
 
   if (!name || !name.trim()) {
     return res.status(400).json({ success: false, error: 'Folder name is required.' });
   }
 
   try {
+    let parentData = null;
+
     // If parentId specified, verify the parent folder exists and user has access
     if (parentId) {
       const parentDoc = await adminDb.collection('folders').doc(parentId).get();
       if (!parentDoc.exists) {
         return res.status(404).json({ success: false, error: 'Parent folder not found.' });
       }
+      parentData = parentDoc.data();
       // Regular users can only create inside their own folders
-      if (req.user.role !== 'admin' && parentDoc.data().createdBy !== req.user.uid) {
+      if (req.user.role !== 'admin' && parentData.createdBy !== req.user.uid) {
         return res.status(403).json({ success: false, error: 'Access denied to parent folder.' });
       }
     }
 
+    let owner;
+    try {
+      owner = await resolveOwnerForFolderCreate({ req, parentData, targetOwnerEmail });
+    } catch (ownerErr) {
+      const statusCode = ownerErr.statusCode || 400;
+      return res.status(statusCode).json({ success: false, error: ownerErr.message });
+    }
+
+    console.log('[folders/create] resolved folder context', {
+      actorEmail: req.user.email || '',
+      actorUid: req.user.uid,
+      role: req.user.role,
+      targetOwnerEmail,
+      parentId: parentId || null,
+      ownerEmail: owner.email || '',
+      ownerUid: owner.uid,
+    });
+
+    const actorEmail = req.user.email || owner.email || '';
+
     const docRef = await adminDb.collection('folders').add({
       name: name.trim(),
       parentId: parentId || null,
-      createdBy: req.user.uid,
-      createdByEmail: req.user.email || '',
+      createdBy: owner.uid,
+      createdByEmail: owner.email,
+      creatorUid: req.user.uid,
+      creatorEmail: actorEmail,
+      createdByAdmin: req.user.role === 'admin' && owner.uid !== req.user.uid,
       createdAt: new Date(),
       updatedAt: new Date(),
     });
@@ -44,7 +134,10 @@ router.post('/', verifyAuth, async (req, res) => {
     // --- FTP sync: create directory on FTP ---
     try {
       const ftpPath = await resolveFolderFtpPath(docRef.id, adminDb);
-      if (ftpPath) await mkdirOnFtp(ftpPath);
+      if (ftpPath) {
+        console.log('[folders/create] ftp path resolved', { folderId: docRef.id, ftpPath });
+        await mkdirOnFtp(ftpPath);
+      }
     } catch (ftpErr) {
       console.warn('[ftp] mkdir warning:', ftpErr.message);
     }

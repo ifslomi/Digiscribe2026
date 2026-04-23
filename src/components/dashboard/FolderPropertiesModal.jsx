@@ -29,7 +29,11 @@ export default function FolderPropertiesModal({ folder, itemCount, totalSize, on
     { label: 'Folder Name', value: folder.name },
     { label: 'Items', value: itemCount !== undefined ? `${itemCount} item${itemCount !== 1 ? 's' : ''}` : '--' },
     { label: 'Total Size', value: totalSize > 0 ? formatSize(totalSize) : '0 B (empty)' },
-    { label: 'Created By', value: folder.createdByEmail || '--' },
+    { label: 'Created By', value: folder.creatorEmail || folder.createdByEmail || '--' },
+    folder.creatorEmail && folder.createdByEmail && folder.creatorEmail !== folder.createdByEmail && {
+      label: 'Owned By',
+      value: folder.createdByEmail,
+    },
     { label: 'Created', value: formatDate(folder.createdAt) },
     folder.updatedAt && { label: 'Last Modified', value: formatDate(folder.updatedAt) },
     { label: 'Folder ID', value: folder.id },
