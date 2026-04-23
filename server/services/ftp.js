@@ -128,9 +128,29 @@ export async function downloadFromFtp(remotePath, localPath) {
 export async function streamFromFtp(remotePath, writableStream, options = {}) {
   const { startAt = 0, maxBytes } = options;
   const client = await createClient();
+  const isWritableClosed = () => writableStream.destroyed || writableStream.writableEnded || writableStream.writableFinished;
+  const shouldIgnoreStreamError = (err) => {
+    if (!err) return false;
+    return (
+      err.code === 'ERR_STREAM_UNABLE_TO_PIPE' ||
+      err.code === 'ERR_STREAM_DESTROYED' ||
+      err.code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+      /closed or destroyed stream/i.test(err.message || '')
+    );
+  };
+  const handleWritableClose = () => {
+    client.close();
+  };
+
+  writableStream.once('close', handleWritableClose);
   try {
+    if (isWritableClosed()) return;
+
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
-      await client.downloadTo(writableStream, `${FTP_BASE}/${remotePath}`, startAt);
+      await client.downloadTo(writableStream, `${FTP_BASE}/${remotePath}`, startAt).catch((err) => {
+        if (isWritableClosed() || shouldIgnoreStreamError(err)) return;
+        throw err;
+      });
       return;
     }
 
@@ -176,10 +196,11 @@ export async function streamFromFtp(remotePath, writableStream, options = {}) {
     });
 
     await client.downloadTo(limiter, `${FTP_BASE}/${remotePath}`, startAt).catch((err) => {
-      if (completedEarly) return;
+      if (completedEarly || isWritableClosed() || shouldIgnoreStreamError(err)) return;
       throw err;
     });
   } finally {
+    writableStream.off('close', handleWritableClose);
     client.close();
   }
 }

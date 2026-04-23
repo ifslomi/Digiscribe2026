@@ -1674,12 +1674,10 @@ export default function DashboardPage() {
                                 </span>
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className="text-sm text-gray-text" title={getUploadedByLabel(file)}>
-                                  {getUploadedByLabel(file)}
-                                </span>
+                                <span className="text-sm text-gray-text">{formatRelativeDate(file.uploadedAt)}</span>
                               </td>
                               <td className="px-4 py-3.5">
-                                <span className="text-sm text-gray-text">{formatRelativeDate(file.uploadedAt)}</span>
+                                <span className="text-sm text-gray-text">{file.size > 0 ? formatSize(file.size) : '--'}</span>
                               </td>
                               <td className="px-4 py-3.5 text-center">
                                 <div className="flex items-center justify-center gap-1">
