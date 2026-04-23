@@ -1231,7 +1231,7 @@ app.get('/api/files/*path', async (req, res) => {
   // Plain-text previews are small and are commonly fetched by the browser's
   // text preview modal. Buffering avoids FTP stream-to-response failures for
   // these files while keeping binary assets on the streaming path.
-  const shouldBufferPreview = !isDownload && !req.headers.range && (mime.startsWith('text/') || ext === '.csv');
+  const shouldBufferPreview = !req.headers.range && (mime.startsWith('text/') || ext === '.csv');
   if (shouldBufferPreview) {
     try {
       const buffer = await downloadBufferFromFtp(normalized);
