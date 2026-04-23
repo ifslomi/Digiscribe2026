@@ -87,6 +87,8 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://devteam.digiscribeasiapacific.com',
   'https://devteam.digiscribeasiapacific.com',
+  'https://www.digiscribeasiapacific.com',
+  'https://digiscribe.vercel.app',
   ...(!IS_VERCEL ? ['file://', 'null'] : []),
   ...(process.env.FRONTEND_URL
     ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
@@ -126,7 +128,6 @@ app.use(cors({
     return cb(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Range', 'x-pipeline-key'],
 }));
 app.use(express.json({ limit: '1mb' }));
 
