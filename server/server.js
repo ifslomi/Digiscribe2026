@@ -17,6 +17,8 @@ import pipelineRouter from './routes/pipeline.js';
 import transcriptionsRouter from './routes/transcriptions.js';
 import foldersRouter from './routes/folders.js';
 import { uploadToFtp, uploadBufferToFtp, appendBufferToFtp, moveOnFtp, downloadFromFtp, downloadBufferFromFtp, streamFromFtp, ftpFileSize, deleteFromFtp } from './services/ftp.js';
+import { mapWithConcurrencyLimit } from './services/concurrency.js';
+import { startDeleteJob, getDeleteJob } from './services/deleteJobs.js';
 import { resolveFolderFtpPath, computeFileFtpPath, sanitizeName } from './services/ftpPathResolver.js';
 import { startFtpSync, reconcileOnce } from './services/ftpSync.js';
 
@@ -145,6 +147,13 @@ const allowedFrameAncestors = [
 function applyFileFrameHeaders(res) {
   res.removeHeader('X-Frame-Options');
   res.setHeader('Content-Security-Policy', `frame-ancestors ${allowedFrameAncestors.join(' ')};`);
+}
+
+function escapeContentDispositionFilename(fileName) {
+  return String(fileName || 'download')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/[\r\n]/g, ' ');
 }
 
 app.use(helmet({
@@ -965,16 +974,15 @@ app.post('/api/files/bulk-delete', verifyAuth, async (req, res) => {
   }
 
   try {
-    let deleted = 0;
-    for (const id of fileIds) {
+    const deletionResults = await mapWithConcurrencyLimit(fileIds, 8, async (id) => {
       const docRef = adminDb.collection('files').doc(id);
       const doc = await docRef.get();
-      if (!doc.exists) continue;
+      if (!doc.exists) return 0;
 
       const fileData = doc.data();
 
       // Non-admins can only delete their own files
-      if (req.user.role !== 'admin' && fileData.uploadedBy !== req.user.uid) continue;
+      if (req.user.role !== 'admin' && fileData.uploadedBy !== req.user.uid) return 0;
 
       const remotePath = fileData.storagePath || fileData.savedAs;
       if (remotePath) {
@@ -982,10 +990,46 @@ app.post('/api/files/bulk-delete', verifyAuth, async (req, res) => {
       }
 
       await docRef.delete();
-      deleted++;
-    }
+      return 1;
+    });
+
+    const deleted = deletionResults.reduce((total, value) => total + Number(value || 0), 0);
 
     res.json({ success: true, deleted });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/delete-jobs', verifyAuth, async (req, res) => {
+  const { fileIds = [], folderIds = [] } = req.body || {};
+  if (!Array.isArray(fileIds) && !Array.isArray(folderIds)) {
+    return res.status(400).json({ success: false, error: 'fileIds or folderIds are required.' });
+  }
+  if ((!Array.isArray(fileIds) || fileIds.length === 0) && (!Array.isArray(folderIds) || folderIds.length === 0)) {
+    return res.status(400).json({ success: false, error: 'At least one file or folder is required.' });
+  }
+
+  try {
+    const job = startDeleteJob({ user: req.user, fileIds, folderIds });
+    res.status(202).json({ success: true, job });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/delete-jobs/:jobId', verifyAuth, async (req, res) => {
+  try {
+    const job = getDeleteJob(req.params.jobId);
+    if (!job) {
+      return res.status(404).json({ success: false, error: 'Delete job not found.' });
+    }
+
+    if (req.user.role !== 'admin' && job.userUid !== req.user.uid) {
+      return res.status(403).json({ success: false, error: 'Access denied.' });
+    }
+
+    res.json({ success: true, job });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1271,7 +1315,7 @@ app.get('/api/files/*path', async (req, res) => {
   }
 
   const isDownload = req.query.download === '1';
-  res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`);
+  res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${escapeContentDispositionFilename(safeName)}"`);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mime);
   applyFileFrameHeaders(res);

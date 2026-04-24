@@ -150,8 +150,8 @@ router.put('/metadata/:fileId/description', verifyAuth, async (req, res) => {
 
     const fileData = doc.data();
 
-    // Users can update only their own files; admins can update any file.
-    if (req.user.role !== 'admin' && fileData.uploadedBy !== req.user.uid) {
+    // Users can update only their own non-admin-uploaded files; admins can update any file.
+    if (req.user.role !== 'admin' && (fileData.uploadedBy !== req.user.uid || fileData.uploadedByAdmin)) {
       return res.status(403).json({ success: false, error: 'Access denied.' });
     }
 
@@ -316,20 +316,21 @@ router.delete('/metadata/:fileId', verifyAuth, async (req, res) => {
       return res.status(403).json({ success: false, error: 'You can only delete your own files.' });
     }
 
-    // Delete the file from FTP
+    // Delete the file and any attached transcription from FTP in parallel.
+    const deleteTasks = [];
     const remotePath = fileData.storagePath || fileData.savedAs;
     if (remotePath) {
-      await deleteFromFtp(remotePath);
+      deleteTasks.push(deleteFromFtp(remotePath));
+    }
+    if (fileData.transcriptionStoragePath) {
+      deleteTasks.push(
+        deleteFromFtp(fileData.transcriptionStoragePath).catch((e) => {
+          console.warn('[delete] Failed to clean up transcription:', e.message);
+        })
+      );
     }
 
-    // Delete attached transcription from FTP
-    if (fileData.transcriptionStoragePath) {
-      try {
-        await deleteFromFtp(fileData.transcriptionStoragePath);
-      } catch (e) {
-        console.warn('[delete] Failed to clean up transcription:', e.message);
-      }
-    }
+    await Promise.all(deleteTasks);
 
     // Delete the Firestore document
     await docRef.delete();
@@ -360,18 +361,8 @@ router.post('/metadata/:fileId/transcription', verifyAuth, transcriptionUpload.s
 
     const fileData = doc.data();
     const ownerEmail = fileData.uploadedByEmail || 'unknown';
-
-    // Auto-name: Transcribed_{parentFileNameWithoutExt}.{transcriptionExt}
-    const parentName = fileData.originalName || req.file.originalname;
-    const parentExt = parentName.includes('.') ? parentName.slice(parentName.lastIndexOf('.')) : '';
-    const parentNameWithoutExt = parentExt ? parentName.slice(0, -parentExt.length) : parentName;
-    const transcriptionExt = req.file.originalname.includes('.')
-      ? req.file.originalname.slice(req.file.originalname.lastIndexOf('.'))
-      : '';
-    const safeParentBase = parentNameWithoutExt.replace(/[^a-zA-Z0-9._-]/g, '_');
-    const displayName = `Transcribed_${parentNameWithoutExt}${transcriptionExt}`;
-    const transcriptionFileName = `Transcribed_${safeParentBase}${transcriptionExt}`;
-    const ftpPath = buildTranscriptionFtpPath(ownerEmail, transcriptionFileName);
+    const transcriptionFileName = path.basename(req.file.originalname || 'transcription');
+    const ftpPath = buildTranscriptionFtpPath(ownerEmail, transcriptionFileName, req.params.fileId);
 
     // If a previous transcription exists, delete it from FTP
     if (fileData.transcriptionStoragePath) {
@@ -392,7 +383,7 @@ router.post('/metadata/:fileId/transcription', verifyAuth, transcriptionUpload.s
     // Update Firestore
     await docRef.update({
       transcriptionUrl,
-      transcriptionName: displayName,
+      transcriptionName: transcriptionFileName,
       transcriptionStoragePath: ftpPath,
       transcriptionSize: req.file.size,
       transcriptionType: req.file.mimetype || 'application/octet-stream',
@@ -404,7 +395,7 @@ router.post('/metadata/:fileId/transcription', verifyAuth, transcriptionUpload.s
     res.json({
       success: true,
       transcriptionUrl,
-      transcriptionName: displayName,
+      transcriptionName: transcriptionFileName,
       transcriptionSize: req.file.size,
     });
   } catch (err) {

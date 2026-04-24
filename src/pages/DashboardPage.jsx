@@ -15,12 +15,14 @@ import FolderPropertiesModal from '../components/dashboard/FolderPropertiesModal
 import ContextMenu from '../components/dashboard/ContextMenu';
 import DocumentViewerModal from '../components/dashboard/DocumentViewerModal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import DeleteProgressBar from '../components/ui/DeleteProgressBar';
 import RenameDialog from '../components/ui/RenameDialog';
 import { Button } from '../components/ui/button';
 import { ServicePicker, SERVICE_TREE } from '../components/dashboard/FolderFilterToolbar';
 import { useFirestoreFiles } from '../hooks/useFirestoreFiles';
 import { useFolders } from '../hooks/useFolders';
 import { useFolderActions } from '../hooks/useFolderActions';
+import { useDeleteJob } from '../hooks/useDeleteJob';
 import { useTranscriptions } from '../hooks/useTranscriptions';
 import { useAppToast } from '../hooks/useAppToast';
 import { useAuth } from '../contexts/AuthContext';
@@ -145,9 +147,25 @@ function getPageNumbers(current, total) {
   return pages;
 }
 
+function buildDeleteSummaryMessage(summary) {
+  const deletedFiles = Number(summary?.deletedFiles || 0);
+  const deletedFolders = Number(summary?.deletedFolders || 0);
+  const skippedFiles = Number(summary?.skippedFiles || 0);
+  const skippedFolders = Number(summary?.skippedFolders || 0);
+  const parts = [];
+
+  if (deletedFiles > 0) parts.push(`${deletedFiles} file${deletedFiles !== 1 ? 's' : ''}`);
+  if (deletedFolders > 0) parts.push(`${deletedFolders} folder${deletedFolders !== 1 ? 's' : ''}`);
+  if (skippedFiles > 0) parts.push(`${skippedFiles} skipped file${skippedFiles !== 1 ? 's' : ''}`);
+  if (skippedFolders > 0) parts.push(`${skippedFolders} skipped folder${skippedFolders !== 1 ? 's' : ''}`);
+
+  return parts.length > 0 ? `Deleted ${parts.join(', ')}.` : 'Nothing was deleted.';
+}
+
 export default function DashboardPage() {
   const { user, isAdmin, getIdToken } = useAuth();
   const toast = useAppToast();
+  const { job: deleteJob, startDeleteJob } = useDeleteJob('user-dashboard-delete-job-v1');
   const [activeTab, setActiveTab] = useState('files');
   const [viewMode, setViewMode] = useState(() => {
     if (typeof window === 'undefined') return 'list';
@@ -473,14 +491,8 @@ export default function DashboardPage() {
     setDeleteLoading(fileId);
     setMessage(null);
     try {
-      const token = await getIdToken();
-      const res = await fetch(`/api/files/metadata/${fileId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete file.');
-      setMessage({ type: 'success', text: 'File deleted.' });
+      const result = await startDeleteJob({ fileIds: [fileId] });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setSelectedIds((prev) => {
         const next = new Set(prev);
         next.delete(fileId);
@@ -493,7 +505,7 @@ export default function DashboardPage() {
       setDeleteConfirm(null);
       setTimeout(() => setMessage(null), 3000);
     }
-  }, [getIdToken]);
+  }, [startDeleteJob]);
 
   const handleUpdateDescription = useCallback(async (fileId, description) => {
     const token = await getIdToken();
@@ -772,36 +784,8 @@ export default function DashboardPage() {
     setBulkLoading(true);
     setMessage(null);
     try {
-      let deletedFiles = 0;
-      let deletedFolders = 0;
-      let skippedFolders = 0;
-
-      if (selectedFileIds.length > 0) {
-        const token = await getIdToken();
-        const res = await fetch('/api/files/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ fileIds: selectedFileIds }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Bulk delete failed.');
-        deletedFiles = Number(data.deleted || 0);
-      }
-
-      for (const folderId of selectedFolderIds) {
-        try {
-          await deleteFolder(folderId);
-          deletedFolders++;
-        } catch {
-          skippedFolders++;
-        }
-      }
-
-      const parts = [];
-      if (deletedFiles > 0) parts.push(`${deletedFiles} file${deletedFiles !== 1 ? 's' : ''}`);
-      if (deletedFolders > 0) parts.push(`${deletedFolders} folder${deletedFolders !== 1 ? 's' : ''}`);
-      if (skippedFolders > 0) parts.push(`${skippedFolders} skipped`);
-      setMessage({ type: 'success', text: `Deleted ${parts.join(', ')}.` });
+      const result = await startDeleteJob({ fileIds: selectedFileIds, folderIds: selectedFolderIds });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setSelectedIds(new Set());
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -810,7 +794,7 @@ export default function DashboardPage() {
       setBulkDeleteConfirm(false);
       setTimeout(() => setMessage(null), 3000);
     }
-  }, [selectedFileIds, selectedFolderIds, getIdToken, deleteFolder]);
+  }, [selectedFileIds, selectedFolderIds, startDeleteJob]);
 
   // Copy file URL to clipboard
   const copyFileUrl = useCallback((file) => {
@@ -859,6 +843,7 @@ export default function DashboardPage() {
       note: transcription.note || '',
       fileDescription: transcription.fileDescription || '',
       sourceType: 'file',
+      uploadedByAdmin: true,
     });
   }, []);
 
@@ -883,10 +868,11 @@ export default function DashboardPage() {
   }, [renameFolder, refetchFolders]);
 
   const handleDeleteFolder = useCallback(async (folderId) => {
+    setBulkLoading(true);
     try {
-      await deleteFolder(folderId);
+      const result = await startDeleteJob({ folderIds: [folderId] });
       await refetchFolders();
-      setMessage({ type: 'success', text: 'Folder and its contents deleted.' });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setTimeout(() => setMessage(null), 3000);
       // If we're inside the deleted folder, navigate to parent
       if (currentFolderId === folderId) {
@@ -895,9 +881,11 @@ export default function DashboardPage() {
       }
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
+    } finally {
+      setBulkLoading(false);
     }
     setDeleteFolderConfirm(null);
-  }, [deleteFolder, refetchFolders, currentFolderId, allFolders]);
+  }, [startDeleteJob, refetchFolders, currentFolderId, allFolders]);
 
   // Track whether any drag is in progress (used to light up breadcrumb drop zone)
   useEffect(() => {
@@ -1431,6 +1419,11 @@ export default function DashboardPage() {
               )}
 
               {/* Select All bar */}
+              {deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') && (
+                <div className="bg-white rounded-xl border border-sky-100 p-4 mb-4 shadow-sm">
+                  <DeleteProgressBar job={deleteJob} showBackgroundNote />
+                </div>
+              )}
               {(filteredFiles.length > 0 || currentSubfolders.length > 0) && (
                 <div className="flex items-center gap-3 mb-4">
                   <Button
@@ -1718,19 +1711,25 @@ export default function DashboardPage() {
                               <tr className="bg-emerald-50/30" onContextMenu={(e) => handleTranscriptionContextMenu(e, file)}>
                                 <td className="px-3 py-2"></td>
                                 <td className="px-4 py-2" colSpan={3}>
-                                  <div className="flex items-center gap-2.5 pl-11">
-                                    <span className="text-gray-300 text-xs select-none">└─</span>
-                                    <div className="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                                  <div className="flex items-start gap-3 pl-11">
+                                    <span className="text-gray-300 text-xs select-none mt-2">└─</span>
+                                    <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                                       <i className="fas fa-file-circle-check text-emerald-500 text-[10px]"></i>
                                     </div>
-                                    <button
-                                      type="button"
-                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize, description: file.description || '', note: file.description || '', fileDescription: file.description || '' })}
-                                      className="text-[12px] font-medium text-dark-text truncate max-w-[220px] hover:text-primary transition-colors text-left"
-                                      title={file.transcriptionName}
-                                    >
-                                      {file.transcriptionName || 'Transcription'}
-                                    </button>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-medium mb-1">
+                                        <i className="fas fa-paperclip text-[8px]"></i>
+                                        Transcripted file
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => openTranscriptionPreview(file)}
+                                        className="block text-left text-[12px] font-medium text-dark-text truncate max-w-[260px] hover:text-primary transition-colors"
+                                        title={file.transcriptionName}
+                                      >
+                                        {file.transcriptionName || 'Transcription'}
+                                      </button>
+                                    </div>
                                   </div>
                                 </td>
                                 <td className="px-4 py-2">
@@ -1743,7 +1742,7 @@ export default function DashboardPage() {
                                   <div className="flex items-center justify-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize, description: file.description || '', note: file.description || '', fileDescription: file.description || '' })}
+                                      onClick={() => openTranscriptionPreview(file)}
                                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-400 hover:text-primary hover:bg-primary/5 transition-colors"
                                       title="View transcription"
                                     >
@@ -1981,8 +1980,8 @@ export default function DashboardPage() {
                             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                               t.deliveryType === 'file' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
                             }`}>
-                              <i className={`fas ${t.deliveryType === 'file' ? 'fa-download' : 'fa-align-left'} text-[8px]`}></i>
-                              {t.deliveryType === 'file' ? 'File' : 'Text'}
+                              <i className={`fas ${t.deliveryType === 'file' ? 'fa-file-circle-check' : 'fa-align-left'} text-[8px]`}></i>
+                              {t.deliveryType === 'file' ? 'Transcripted file' : 'Text'}
                             </span>
                           </div>
                           {t.deliveryType === 'text' && t.content && (
@@ -2010,7 +2009,7 @@ export default function DashboardPage() {
         <FilePreviewModal
           file={previewFile}
           onClose={() => setPreviewFile(null)}
-          canEditDescription={!isAdmin}
+          canEditDescription={!isAdmin && !previewFile.uploadedByAdmin}
           onSaveDescription={handleUpdateDescription}
         />
       )}
@@ -2092,6 +2091,7 @@ export default function DashboardPage() {
         confirmLabel="Delete"
         tone="danger"
         loading={deleteLoading === deleteConfirm}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={() => deleteConfirm && handleDeleteFile(deleteConfirm)}
         onCancel={() => setDeleteConfirm(null)}
       />
@@ -2103,6 +2103,7 @@ export default function DashboardPage() {
         confirmLabel="Delete Selected"
         tone="danger"
         loading={bulkLoading}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteConfirm(false)}
       />
@@ -2114,6 +2115,7 @@ export default function DashboardPage() {
         confirmLabel="Delete Folder"
         tone="danger"
         loading={bulkLoading}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={() => deleteFolderConfirm && handleDeleteFolder(deleteFolderConfirm)}
         onCancel={() => setDeleteFolderConfirm(null)}
       />

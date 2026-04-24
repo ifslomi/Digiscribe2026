@@ -288,19 +288,6 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
               {folderName}
             </Button>
           )}
-          {file.transcriptionUrl && isAdmin && (
-            <Button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onTranscription && onTranscription(file); }}
-              variant="outline"
-              size="sm"
-              className="gap-1 h-auto px-2 py-0.5 rounded-md text-[10px] font-medium bg-emerald-50 text-emerald-600 border-emerald-100 hover:bg-emerald-100"
-              title={file.transcriptionName || 'Transcription attached'}
-            >
-              <i className="fas fa-file-circle-check text-[8px] text-emerald-400"></i>
-              Transcribed
-            </Button>
-          )}
           {delegatedUploaderEmail && (
             <Badge variant="outline" className="gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-medium bg-blue-50 text-blue-700 border-blue-100" title={`Uploaded by ${delegatedUploaderEmail}`}>
               <i className="fas fa-user-shield text-[8px] text-blue-500"></i>
@@ -316,18 +303,32 @@ export default function FileCard({ file, isAdmin, onStatusChange, onPreview, isS
           </p>
         )}
 
-        {/* Transcription attachment (user grid view) */}
-        {file.transcriptionUrl && !isAdmin && (
-          <div className="mb-3 p-2.5 rounded-lg bg-emerald-50/60 border border-emerald-100">
-            <div className="flex items-center gap-2 mb-1.5">
-              <div className="w-5 h-5 rounded-md bg-emerald-100 flex items-center justify-center flex-shrink-0">
-                <i className="fas fa-file-circle-check text-emerald-500 text-[9px]"></i>
+        {/* Transcription attachment */}
+        {file.transcriptionUrl && (
+          <div className="mb-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0">
+                <i className="fas fa-file-circle-check text-emerald-500 text-[10px]"></i>
               </div>
-              <span className="text-[11px] font-medium text-dark-text truncate flex-1" title={file.transcriptionName}>
-                {file.transcriptionName || 'Transcription'}
-              </span>
+              <div className="min-w-0 flex-1">
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-medium mb-1">
+                  <i className="fas fa-paperclip text-[8px]"></i>
+                  Transcripted file
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewTranscription && onViewTranscription(file);
+                  }}
+                  className="block text-left text-[12px] font-medium text-dark-text truncate hover:text-primary transition-colors"
+                  title={file.transcriptionName}
+                >
+                  {file.transcriptionName || 'Transcription'}
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 pl-7">
+            <div className="flex items-center gap-1.5 mt-3 pl-11">
               <Button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onViewTranscription && onViewTranscription(file); }}

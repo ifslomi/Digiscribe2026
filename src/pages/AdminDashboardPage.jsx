@@ -16,6 +16,7 @@ import DocumentViewerModal from '../components/dashboard/DocumentViewerModal';
 import FolderFilterToolbar from '../components/dashboard/FolderFilterToolbar';
 import { ServicePicker, SERVICE_TREE } from '../components/dashboard/FolderFilterToolbar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import DeleteProgressBar from '../components/ui/DeleteProgressBar';
 import RenameDialog from '../components/ui/RenameDialog';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent } from '../components/ui/dialog';
@@ -24,6 +25,7 @@ import UserTable from '../components/admin/UserTable';
 import { useFirestoreFiles } from '../hooks/useFirestoreFiles';
 import { useFolders } from '../hooks/useFolders';
 import { useFolderActions } from '../hooks/useFolderActions';
+import { useDeleteJob } from '../hooks/useDeleteJob';
 import { useTranscriptions } from '../hooks/useTranscriptions';
 import { useAdminUsers } from '../hooks/useAdminUsers';
 import { useAppToast } from '../hooks/useAppToast';
@@ -139,6 +141,21 @@ function getPageNumbers(current, total) {
   return pages;
 }
 
+function buildDeleteSummaryMessage(summary) {
+  const deletedFiles = Number(summary?.deletedFiles || 0);
+  const deletedFolders = Number(summary?.deletedFolders || 0);
+  const skippedFiles = Number(summary?.skippedFiles || 0);
+  const skippedFolders = Number(summary?.skippedFolders || 0);
+  const parts = [];
+
+  if (deletedFiles > 0) parts.push(`${deletedFiles} file${deletedFiles !== 1 ? 's' : ''}`);
+  if (deletedFolders > 0) parts.push(`${deletedFolders} folder${deletedFolders !== 1 ? 's' : ''}`);
+  if (skippedFiles > 0) parts.push(`${skippedFiles} skipped file${skippedFiles !== 1 ? 's' : ''}`);
+  if (skippedFolders > 0) parts.push(`${skippedFolders} skipped folder${skippedFolders !== 1 ? 's' : ''}`);
+
+  return parts.length > 0 ? `Deleted ${parts.join(', ')}.` : 'Nothing was deleted.';
+}
+
 function getFileIcon(type) {
   if (!type) return 'fa-file';
   if (type.startsWith('image/')) return 'fa-image';
@@ -198,6 +215,7 @@ function FilesTab({
 }) {
   const { user, getIdToken } = useAuth();
   const toast = useAppToast();
+  const { job: deleteJob, startDeleteJob } = useDeleteJob('admin-dashboard-delete-job-v1');
   const { createFolder, renameFolder, moveFolder, deleteFolder, moveFileToFolder } = folderActions;
 
   const [statusFilter, setStatusFilter] = useState('');
@@ -907,14 +925,8 @@ function FilesTab({
     setDeleteLoading(fileId);
     setMessage(null);
     try {
-      const token = await getIdToken();
-      const res = await fetch(`/api/files/metadata/${fileId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to delete file.');
-      setMessage({ type: 'success', text: 'File deleted.' });
+      const result = await startDeleteJob({ fileIds: [fileId] });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(fileId); return next; });
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -923,7 +935,7 @@ function FilesTab({
       setDeleteConfirm(null);
       setTimeout(() => setMessage(null), 3000);
     }
-  }, [getIdToken]);
+  }, [startDeleteJob]);
 
   const handleBulkDownload = useCallback(async () => {
     if (selectedFileIds.length === 0) return;
@@ -963,93 +975,8 @@ function FilesTab({
     setBulkLoading(true);
     setMessage(null);
     try {
-      const token = await getIdToken();
-
-      // Build selected folder subtree ids (selected folder + all descendants).
-      const folderMap = new Map(allFolders.map((folder) => [folder.id, folder]));
-      const childrenByParent = new Map();
-      for (const folder of allFolders) {
-        const parentId = folder.parentId || null;
-        if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
-        childrenByParent.get(parentId).push(folder.id);
-      }
-
-      const folderIdsToDelete = new Set();
-      for (const rootId of selectedFolderIds) {
-        if (!folderMap.has(rootId)) continue;
-        const stack = [rootId];
-        while (stack.length > 0) {
-          const currentId = stack.pop();
-          if (folderIdsToDelete.has(currentId)) continue;
-          folderIdsToDelete.add(currentId);
-          const children = childrenByParent.get(currentId) || [];
-          for (const childId of children) stack.push(childId);
-        }
-      }
-
-      // Delete selected files + files inside selected folder subtrees.
-      const fileIdsToDelete = new Set(selectedFileIds);
-      for (const file of allFiles) {
-        const folderId = file.folderId || null;
-        if (folderId && folderIdsToDelete.has(folderId)) {
-          fileIdsToDelete.add(file.id);
-        }
-      }
-
-      let deletedFiles = 0;
-      const fileIdList = [...fileIdsToDelete];
-      for (let index = 0; index < fileIdList.length; index += 100) {
-        const batch = fileIdList.slice(index, index + 100);
-        if (batch.length === 0) continue;
-        const res = await fetch('/api/files/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ fileIds: batch }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Bulk delete failed.');
-        deletedFiles += Number(data.deleted || 0);
-      }
-
-      // Delete folders deepest-first so parents don't reparent descendants.
-      const depthCache = new Map();
-      const getDepth = (folderId) => {
-        if (depthCache.has(folderId)) return depthCache.get(folderId);
-        const folder = folderMap.get(folderId);
-        if (!folder || !folder.parentId || !folderMap.has(folder.parentId)) {
-          depthCache.set(folderId, 0);
-          return 0;
-        }
-        const depth = 1 + getDepth(folder.parentId);
-        depthCache.set(folderId, depth);
-        return depth;
-      };
-
-      const orderedFolders = [...folderIdsToDelete].sort((a, b) => getDepth(b) - getDepth(a));
-      let deletedFolders = 0;
-      let skippedFolders = 0;
-      for (const folderId of orderedFolders) {
-        try {
-          const res = await fetch(`/api/folders/${folderId}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || !data.success) {
-            skippedFolders++;
-            continue;
-          }
-          deletedFolders++;
-        } catch {
-          skippedFolders++;
-        }
-      }
-
-      const parts = [];
-      if (deletedFiles > 0) parts.push(`${deletedFiles} file${deletedFiles !== 1 ? 's' : ''}`);
-      if (deletedFolders > 0) parts.push(`${deletedFolders} folder${deletedFolders !== 1 ? 's' : ''}`);
-      if (skippedFolders > 0) parts.push(`${skippedFolders} skipped`);
-      setMessage({ type: 'success', text: `Deleted ${parts.join(', ')}.` });
+      const result = await startDeleteJob({ fileIds: selectedFileIds, folderIds: selectedFolderIds });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setSelectedIds(new Set());
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -1058,7 +985,7 @@ function FilesTab({
       setBulkDeleteConfirm(false);
       setTimeout(() => setMessage(null), 3000);
     }
-  }, [selectedFileIds, selectedFolderIds, getIdToken, allFiles, allFolders]);
+  }, [selectedFileIds, selectedFolderIds, startDeleteJob]);
 
   const copyFileUrl = useCallback((file) => {
     const url = fileUrl(file.url);
@@ -1113,10 +1040,11 @@ function FilesTab({
   }, [getIdToken]);
 
   const handleDeleteFolder = useCallback(async (folderId) => {
+    setBulkLoading(true);
     try {
-      await deleteFolder(folderId);
+      const result = await startDeleteJob({ folderIds: [folderId] });
       await refetchFolders();
-      setMessage({ type: 'success', text: 'Folder and its contents deleted.' });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
       setTimeout(() => setMessage(null), 3000);
       if (currentFolderId === folderId) {
         const folder = allFolders.find((f) => f.id === folderId);
@@ -1124,9 +1052,11 @@ function FilesTab({
       }
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
+    } finally {
+      setBulkLoading(false);
     }
     setDeleteFolderConfirm(null);
-  }, [deleteFolder, refetchFolders, currentFolderId, allFolders]);
+  }, [startDeleteJob, refetchFolders, currentFolderId, allFolders]);
 
   // Track whether any drag is in progress (used to light up breadcrumb drop zone)
   useEffect(() => {
@@ -1343,61 +1273,12 @@ function FilesTab({
     setBulkLoading(true);
     setMessage(null);
     try {
-      const token = await getIdToken();
-      const fileIds = allFiles.map((f) => f.id).filter(Boolean);
-
-      let deletedFiles = 0;
-      for (let index = 0; index < fileIds.length; index += 100) {
-        const chunk = fileIds.slice(index, index + 100);
-        if (chunk.length === 0) continue;
-
-        const res = await fetch('/api/files/bulk-delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ fileIds: chunk }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Failed while deleting files.');
-        deletedFiles += Number(data.deleted || 0);
-      }
-
-      const folderMap = new Map(allFolders.map((folder) => [folder.id, folder]));
-      const depthCache = new Map();
-      const getDepth = (folderId) => {
-        if (depthCache.has(folderId)) return depthCache.get(folderId);
-        const folder = folderMap.get(folderId);
-        if (!folder || !folder.parentId || !folderMap.has(folder.parentId)) {
-          depthCache.set(folderId, 0);
-          return 0;
-        }
-        const depth = 1 + getDepth(folder.parentId);
-        depthCache.set(folderId, depth);
-        return depth;
-      };
-
-      const foldersByDepthDesc = [...allFolders]
-        .map((folder) => ({ id: folder.id, depth: getDepth(folder.id) }))
-        .sort((a, b) => b.depth - a.depth)
-        .map((folder) => folder.id);
-
-      let deletedFolders = 0;
-      let skippedFolders = 0;
-      for (const folderId of foldersByDepthDesc) {
-        const res = await fetch(`/api/folders/${folderId}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          skippedFolders += 1;
-          continue;
-        }
-        deletedFolders += 1;
-      }
-
+      const result = await startDeleteJob({
+        fileIds: allFiles.map((f) => f.id).filter(Boolean),
+        folderIds: allFolders.map((folder) => folder.id).filter(Boolean),
+      });
       setSelectedIds(new Set());
-      const skippedText = skippedFolders > 0 ? `, ${skippedFolders} folder(s) skipped` : '';
-      setMessage({ type: 'success', text: `DEV reset done: ${deletedFiles} file(s), ${deletedFolders} folder(s) deleted${skippedText}.` });
+      setMessage({ type: 'success', text: buildDeleteSummaryMessage(result.summary) });
     } catch (err) {
       setMessage({ type: 'error', text: err.message || 'Failed to delete all data.' });
     } finally {
@@ -1405,7 +1286,7 @@ function FilesTab({
       setBulkLoading(false);
       setTimeout(() => setMessage(null), 3500);
     }
-  }, [allFiles, allFolders, bulkLoading, getIdToken]);
+  }, [allFiles, allFolders, bulkLoading, startDeleteJob]);
 
   // Folder download as ZIP
   const handleFolderDownload = useCallback(async (folder) => {
@@ -2039,6 +1920,11 @@ function FilesTab({
       )}
 
       {/* Bulk action bar */}
+      {deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') && (
+        <div className="bg-white rounded-xl border border-sky-100 p-4 mb-4 shadow-sm">
+          <DeleteProgressBar job={deleteJob} showBackgroundNote />
+        </div>
+      )}
       {selectedCount > 0 && (
         <div className="bg-white rounded-xl border border-primary/20 p-3 shadow-sm flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
@@ -2558,19 +2444,25 @@ function FilesTab({
                       >
                         <td className="px-3 py-2"></td>
                         <td className="px-4 py-2" colSpan={4}>
-                          <div className="flex items-center gap-2.5 pl-11">
-                            <span className="text-gray-300 text-xs select-none">└─</span>
-                            <div className="w-6 h-6 rounded-md bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                          <div className="flex items-start gap-3 pl-11">
+                            <span className="text-gray-300 text-xs select-none mt-2">└─</span>
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center flex-shrink-0 mt-0.5">
                               <i className="fas fa-file-circle-check text-emerald-500 text-[10px]"></i>
                             </div>
-                            <button
-                              type="button"
-                                      onClick={() => openTranscriptionPreview(file)}
-                              className="text-[12px] font-medium text-dark-text truncate max-w-[220px] hover:text-primary transition-colors text-left"
-                              title={file.transcriptionName}
-                            >
-                              {file.transcriptionName || 'Transcription'}
-                            </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-medium mb-1">
+                                <i className="fas fa-paperclip text-[8px]"></i>
+                                Transcripted file
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openTranscriptionPreview(file)}
+                                className="block text-left text-[12px] font-medium text-dark-text truncate max-w-[260px] hover:text-primary transition-colors"
+                                title={file.transcriptionName}
+                              >
+                                {file.transcriptionName || 'Transcription'}
+                              </button>
+                            </div>
                           </div>
                         </td>
                         <td className="px-4 py-2">
@@ -2874,6 +2766,7 @@ function FilesTab({
                   deleteLoading={deleteLoading === file.id}
                   folderName={statusFilter && !isInsideFolder && file.folderId ? (folderMap[file.folderId] || 'folder') : ''}
                   onOpenFolder={statusFilter && !isInsideFolder && file.folderId ? () => setCurrentFolderId(file.folderId) : undefined}
+                  onViewTranscription={file.transcriptionUrl ? openTranscriptionPreview : undefined}
                   onTranscription={(f) => setTranscriptionTarget(f)}
                 />
               </div>
@@ -3022,6 +2915,7 @@ function FilesTab({
         confirmLabel="Delete"
         tone="danger"
         loading={deleteLoading === deleteConfirm}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={() => deleteConfirm && handleDeleteFile(deleteConfirm)}
         onCancel={() => setDeleteConfirm(null)}
       />
@@ -3033,6 +2927,7 @@ function FilesTab({
         confirmLabel="Delete Selected"
         tone="danger"
         loading={bulkLoading}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={handleBulkDelete}
         onCancel={() => setBulkDeleteConfirm(false)}
       />
@@ -3044,6 +2939,7 @@ function FilesTab({
         confirmLabel="Delete Folder"
         tone="danger"
         loading={bulkLoading}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={() => deleteFolderConfirm && handleDeleteFolder(deleteFolderConfirm)}
         onCancel={() => setDeleteFolderConfirm(null)}
       />
@@ -3055,6 +2951,7 @@ function FilesTab({
         confirmLabel="Delete Everything"
         tone="danger"
         loading={bulkLoading}
+        progress={deleteJob && (deleteJob.status === 'queued' || deleteJob.status === 'running') ? deleteJob : null}
         onConfirm={handleDeleteAllDev}
         onCancel={() => setDeleteAllDevConfirm(false)}
       />
@@ -3190,6 +3087,10 @@ function FilesTab({
                       <i className="fas fa-file-circle-check text-emerald-600 text-sm"></i>
                     </div>
                     <div className="flex-1 min-w-0">
+                      <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-medium mb-1">
+                        <i className="fas fa-paperclip text-[8px]"></i>
+                        Transcripted file
+                      </div>
                       <p className="text-sm font-medium text-emerald-800 truncate">{transcriptionTarget.transcriptionName}</p>
                       <p className="text-[11px] text-emerald-600 mt-0.5">
                         {transcriptionTarget.transcriptionSize ? formatSize(transcriptionTarget.transcriptionSize) : ''}

@@ -133,6 +133,7 @@ export default defineConfig({
       '/api/files/bulk-move': devApiOrigin,
       '/api/files/bulk-status': devApiOrigin,
       '/api/files/download-folder': devApiOrigin,
+      '/api/delete-jobs': devApiOrigin,
       '/api/pipeline': devApiOrigin,
       '/api/folders': devApiOrigin,
       '/api/lgus': devApiOrigin,

@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from './dialog';
 import { Button } from './button';
+import DeleteProgressBar from './DeleteProgressBar';
 
 export default function ConfirmDialog({
   open,
@@ -16,6 +17,7 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancel',
   tone = 'danger',
   loading = false,
+  progress = null,
   onConfirm,
   onCancel,
 }) {
@@ -42,6 +44,11 @@ export default function ConfirmDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{message}</DialogDescription>
         </DialogHeader>
+        {progress && (
+          <div className="px-6 pb-4">
+            <DeleteProgressBar job={progress} compact />
+          </div>
+        )}
         <DialogFooter>
           <Button type="button" variant="secondary" disabled={loading} onClick={onCancel}>
             {cancelLabel}

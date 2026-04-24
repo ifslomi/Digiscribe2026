@@ -106,6 +106,7 @@ export default function UserTranscriptionViewPage() {
 
   const t = transcription;
   const noteText = (t?.note || t?.fileDescription || '').trim();
+  const isFileDelivery = t?.deliveryType === 'file';
 
   return (
     <Layout heroContent={heroContent}>
@@ -124,10 +125,10 @@ export default function UserTranscriptionViewPage() {
                 </span>
               </div>
               <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                t.deliveryType === 'file' ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
+                isFileDelivery ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'
               }`}>
-                <i className={`fas ${t.deliveryType === 'file' ? 'fa-file-audio' : 'fa-align-left'} text-[10px]`}></i>
-                {t.deliveryType === 'file' ? 'File Delivery' : 'Text Transcription'}
+                <i className={`fas ${isFileDelivery ? 'fa-file-circle-check' : 'fa-align-left'} text-[10px]`}></i>
+                {isFileDelivery ? 'Transcripted File' : 'Text Transcription'}
               </div>
               {t.fileType && (
                 <div className="flex items-center gap-2 text-gray-text">
@@ -139,11 +140,15 @@ export default function UserTranscriptionViewPage() {
           </div>
 
           {/* Content */}
-          {t.deliveryType === 'file' ? (
+          {isFileDelivery ? (
             <div className="bg-white rounded-2xl border border-gray-100 p-8">
               <div className="text-center">
                 <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <i className="fas fa-file-audio text-rose-500 text-2xl"></i>
+                  <i className="fas fa-file-circle-check text-rose-500 text-2xl"></i>
+                </div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-600 text-[11px] font-medium mb-3">
+                  <i className="fas fa-paperclip text-[9px]"></i>
+                  Transcripted file
                 </div>
                 <h3 className="text-sm font-semibold text-dark-text mb-1">
                   {t.deliveryFileName || 'Transcription File'}
@@ -163,7 +168,7 @@ export default function UserTranscriptionViewPage() {
                     className="inline-flex items-center gap-2 btn-gradient text-white px-6 py-2.5 rounded-xl text-sm font-semibold shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 transition-all"
                   >
                     <i className="fas fa-download text-xs"></i>
-                    Download File
+                    Download Transcript
                   </a>
                 )}
               </div>
@@ -182,16 +187,20 @@ export default function UserTranscriptionViewPage() {
             </div>
           )}
 
-          <div className="bg-white rounded-2xl border border-gray-100 p-6 mt-6">
-            <div className="flex items-center gap-2 mb-3">
+          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden mt-6">
+            <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
               <i className="fas fa-sticky-note text-amber-500 text-sm"></i>
-              <h3 className="text-sm font-semibold text-dark-text">Note</h3>
+              <h3 className="text-sm font-semibold text-dark-text">Description / Note</h3>
             </div>
-            {noteText ? (
-              <p className="text-sm text-dark-text whitespace-pre-wrap leading-relaxed">{noteText}</p>
-            ) : (
-              <p className="text-sm text-gray-400 italic">No note provided.</p>
-            )}
+            <div className="p-6">
+              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3.5 py-2.5 max-h-56 overflow-y-auto">
+                {noteText ? (
+                  <p className="text-sm md:text-[15px] text-dark-text whitespace-pre-wrap leading-relaxed">{noteText}</p>
+                ) : (
+                  <p className="text-sm md:text-[15px] text-gray-400 italic">No note provided.</p>
+                )}
+              </div>
+            </div>
           </div>
 
         </div>

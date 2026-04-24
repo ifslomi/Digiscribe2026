@@ -1,4 +1,5 @@
 import path from 'path';
+import { mapWithConcurrencyLimit } from './concurrency.js';
 
 /**
  * Sanitise an email into a safe FTP directory name (username part only).
@@ -109,17 +110,17 @@ export async function getDescendantFolderIds(folderId, db) {
  * @param {string} folderId - The folder whose FTP path changed
  * @param {FirebaseFirestore.Firestore} db
  */
-export async function updateDescendantFilePaths(folderId, db) {
+export async function updateDescendantFilePaths(folderId, db, onFileUpdated) {
   const allFolderIds = [folderId, ...(await getDescendantFolderIds(folderId, db))];
 
   for (const fid of allFolderIds) {
     const folderPath = await resolveFolderFtpPath(fid, db);
     const filesSnap = await db.collection('files').where('folderId', '==', fid).get();
 
-    for (const fileDoc of filesSnap.docs) {
+    await mapWithConcurrencyLimit(filesSnap.docs, 6, async (fileDoc) => {
       const data = fileDoc.data();
       const fileName = data.savedAs || path.posix.basename(data.storagePath || '');
-      if (!fileName) continue;
+      if (!fileName) return;
 
       const newStoragePath = folderPath ? `${folderPath}/${fileName}` : fileName;
       const encodedPath = newStoragePath.split('/').map(encodeURIComponent).join('/');
@@ -129,7 +130,8 @@ export async function updateDescendantFilePaths(folderId, db) {
         url: `/api/files/${encodedPath}`,
         updatedAt: new Date(),
       });
-    }
+      if (onFileUpdated) onFileUpdated(fileDoc);
+    });
   }
 }
 
@@ -137,14 +139,16 @@ export { sanitizeName, sanitizeEmail };
 
 /**
  * Builds the FTP storage path for a transcription attachment.
- * Layout: admin/Transcribed/{ownerEmailDir}/{fileName}
+ * Layout: admin/Transcribed/{ownerEmailDir}/{fileId}/{fileName}
  *
  * @param {string} ownerEmail - The email of the file's uploader
  * @param {string} fileName - The transcription file name
+ * @param {string} fileId - Firestore file document ID used to keep paths unique
  * @returns {string} FTP path relative to FTP_BASE
  */
-export function buildTranscriptionFtpPath(ownerEmail, fileName) {
+export function buildTranscriptionFtpPath(ownerEmail, fileName, fileId = '') {
   const emailDir = sanitizeEmail(ownerEmail);
-  const safeName = (fileName || 'transcription').replace(/[^a-zA-Z0-9._-]/g, '_');
-  return `admin/Transcribed/${emailDir}/${safeName}`;
+  const fileDir = sanitizeName(fileId || 'transcription');
+  const safeName = path.posix.basename(String(fileName || 'transcription').replace(/\0/g, '')) || 'transcription';
+  return `admin/Transcribed/${emailDir}/${fileDir}/${safeName}`;
 }

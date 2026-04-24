@@ -99,8 +99,8 @@ router.post('/upload', verifyAdmin, deliveryUpload.single('deliveryFile'), async
     const fileData = fileDoc.data();
 
     const now = new Date();
-    // FTP path: _deliveries/filename (relative to FTP_BASE)
-    const deliveryPath = `_deliveries/${path.basename(req.file.path)}`;
+    // FTP path: _deliveries/{fileId}/filename (relative to FTP_BASE)
+    const deliveryPath = `_deliveries/${fileId}/${path.basename(req.file.originalname || 'delivery')}`;
 
     // Upload to FTP, then remove local temp file
     await uploadToFtp(req.file.path, deliveryPath);

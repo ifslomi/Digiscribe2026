@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { adminAuth, adminDb } from '../firebaseAdmin.js';
 import { verifyAuth } from '../middleware/authMiddleware.js';
 import { mkdirOnFtp, renameDirOnFtp, removeDirOnFtp, moveOnFtp } from '../services/ftp.js';
+import { mapWithConcurrencyLimit } from '../services/concurrency.js';
 import {
   resolveFolderFtpPath,
   sanitizeName,
@@ -308,32 +309,33 @@ router.delete('/:id', verifyAuth, async (req, res) => {
       .get();
 
     // --- FTP sync: move each file on FTP to the parent folder path ---
-    for (const fileDoc of filesSnapshot.docs) {
+    await mapWithConcurrencyLimit(filesSnapshot.docs, 6, async (fileDoc) => {
       const fileData = fileDoc.data();
       const oldStoragePath = fileData.storagePath || fileData.savedAs;
-      if (oldStoragePath) {
-        try {
-          const newStoragePath = await computeFileFtpPath(fileData, newParent, adminDb);
-          if (oldStoragePath !== newStoragePath) {
-            await moveOnFtp(oldStoragePath, newStoragePath);
-            const encodedPath = newStoragePath.split('/').map(encodeURIComponent).join('/');
-            await fileDoc.ref.update({
-              folderId: newParent,
-              storagePath: newStoragePath,
-              url: `/api/files/${encodedPath}`,
-              updatedAt: new Date(),
-            });
-          } else {
-            await fileDoc.ref.update({ folderId: newParent, updatedAt: new Date() });
-          }
-        } catch (ftpErr) {
-          console.warn('[ftp] delete-folder file-move warning:', ftpErr.message);
+      if (!oldStoragePath) {
+        await fileDoc.ref.update({ folderId: newParent, updatedAt: new Date() });
+        return;
+      }
+
+      try {
+        const newStoragePath = await computeFileFtpPath(fileData, newParent, adminDb);
+        if (oldStoragePath !== newStoragePath) {
+          await moveOnFtp(oldStoragePath, newStoragePath);
+          const encodedPath = newStoragePath.split('/').map(encodeURIComponent).join('/');
+          await fileDoc.ref.update({
+            folderId: newParent,
+            storagePath: newStoragePath,
+            url: `/api/files/${encodedPath}`,
+            updatedAt: new Date(),
+          });
+        } else {
           await fileDoc.ref.update({ folderId: newParent, updatedAt: new Date() });
         }
-      } else {
+      } catch (ftpErr) {
+        console.warn('[ftp] delete-folder file-move warning:', ftpErr.message);
         await fileDoc.ref.update({ folderId: newParent, updatedAt: new Date() });
       }
-    }
+    });
 
     // Move all subfolders to the parent folder (Firestore only — FTP dirs will be inside the folder being deleted)
     const subfoldersSnapshot = await adminDb.collection('folders')
@@ -351,14 +353,14 @@ router.delete('/:id', verifyAuth, async (req, res) => {
     await batch.commit();
 
     // --- FTP sync: update subfolder descendant file paths, then try to remove the old directory ---
-    for (const subDoc of subfoldersSnapshot.docs) {
+    await mapWithConcurrencyLimit(subfoldersSnapshot.docs, 3, async (subDoc) => {
       try {
         // After parentId update, recalculate FTP paths for all files in each subfolder tree
         await updateDescendantFilePaths(subDoc.id, adminDb);
       } catch (ftpErr) {
         console.warn('[ftp] delete-folder subfolder-path-update warning:', ftpErr.message);
       }
-    }
+    });
 
     if (folderFtpPath) {
       try {
