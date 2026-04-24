@@ -80,8 +80,23 @@ if (!IS_VERCEL) {
 }
 
 // CORS — allow dev + production origins
-// FRONTEND_URL supports comma-separated values, e.g.:
+// FRONTEND_URL / ALLOWED_ORIGINS / CORS_ORIGINS support comma-separated values, e.g.:
 //   https://digiscribedev2026.onrender.com,https://devteam.digiscribeasiapacific.com
+function readEnvOriginList(...keys) {
+  return keys.flatMap((key) => {
+    const raw = process.env[key];
+    return raw ? raw.split(',').map((value) => value.trim()) : [];
+  }).filter(Boolean);
+}
+
+function normalizeFrameAncestor(input) {
+  const value = String(input || '').trim();
+  if (!value) return '';
+  if (value === 'self' || value === "'self'") return "'self'";
+  if (/^https?:\/\//i.test(value)) return normalizeOrigin(value);
+  return value.replace(/\/+$/, '').toLowerCase();
+}
+
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
@@ -91,9 +106,7 @@ const allowedOrigins = [
   'https://www.digiscribeasiapacific.com',
   'https://digiscribe.vercel.app',
   ...(!IS_VERCEL ? ['file://', 'null'] : []),
-  ...(process.env.FRONTEND_URL
-    ? process.env.FRONTEND_URL.split(',').map((u) => u.trim())
-    : []),
+  ...readEnvOriginList('FRONTEND_URL', 'ALLOWED_ORIGINS', 'CORS_ORIGINS'),
 ].filter(Boolean);
 
 const allowedOriginPatterns = [
@@ -115,6 +128,23 @@ const allowedOriginSet = new Set(allowedOrigins.map(normalizeOrigin));
 function isAllowedOrigin(normalizedOrigin) {
   if (allowedOriginSet.has(normalizedOrigin)) return true;
   return allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+}
+
+const allowedFrameAncestors = [
+  "'self'",
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://devteam.digiscribeasiapacific.com',
+  'https://devteam.digiscribeasiapacific.com',
+  'https://digiscribeasiapacific.com',
+  'https://www.digiscribeasiapacific.com',
+  'https://digiscribe.vercel.app',
+  ...readEnvOriginList('FRONTEND_URL', 'ALLOWED_ORIGINS', 'FRAME_ANCESTORS', 'CSP_FRAME_ANCESTORS').map(normalizeFrameAncestor),
+].map(normalizeFrameAncestor).filter(Boolean);
+
+function applyFileFrameHeaders(res) {
+  res.removeHeader('X-Frame-Options');
+  res.setHeader('Content-Security-Policy', `frame-ancestors ${allowedFrameAncestors.join(' ')};`);
 }
 
 app.use(helmet({
@@ -203,7 +233,7 @@ function getFileCategory(mimeType) {
   if (mimeType?.startsWith('image/')) return 'Image';
   if (mimeType === 'application/pdf') return 'PDF';
   if (mimeType?.startsWith('application/')) return 'Document';
-  return 'Other';
+  return 'Other';;
 }
 
 // Build a flat filename prefix: {Service}_{timestamp}
@@ -1244,6 +1274,7 @@ app.get('/api/files/*path', async (req, res) => {
   res.setHeader('Content-Disposition', `${isDownload ? 'attachment' : 'inline'}; filename="${safeName}"`);
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', mime);
+  applyFileFrameHeaders(res);
 
   // Plain-text previews are small and are commonly fetched by the browser's
   // text preview modal. Buffering avoids FTP stream-to-response failures for
