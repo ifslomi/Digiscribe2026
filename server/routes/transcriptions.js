@@ -157,12 +157,30 @@ router.get('/', verifyAuth, async (req, res) => {
     }
 
     const snapshot = await query.get();
-    let transcriptions = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
-      updatedAt: doc.data().updatedAt?.toDate?.()?.toISOString() || doc.data().updatedAt,
-    })).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+    let transcriptions = await Promise.all(snapshot.docs.map(async (doc) => {
+      const data = doc.data();
+
+      let fileDescription = '';
+      if (data.fileId) {
+        const fileDoc = await adminDb.collection('files').doc(data.fileId).get();
+        if (fileDoc.exists) {
+          fileDescription = fileDoc.data().description || '';
+        }
+      }
+
+      const note = data.description || data.note || fileDescription || '';
+
+      return {
+        id: doc.id,
+        ...data,
+        note,
+        fileDescription,
+        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAt,
+        updatedAt: data.updatedAt?.toDate?.()?.toISOString() || data.updatedAt,
+      };
+    }));
+
+    transcriptions.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
     // Client-side text search (Firestore doesn't support full-text search)
     if (search) {
@@ -170,7 +188,9 @@ router.get('/', verifyAuth, async (req, res) => {
       transcriptions = transcriptions.filter((t) =>
         t.title?.toLowerCase().includes(searchLower) ||
         t.content?.toLowerCase().includes(searchLower) ||
-        t.fileName?.toLowerCase().includes(searchLower)
+        t.fileName?.toLowerCase().includes(searchLower) ||
+        t.note?.toLowerCase().includes(searchLower) ||
+        t.fileDescription?.toLowerCase().includes(searchLower)
       );
     }
 

@@ -49,18 +49,34 @@ export default function DocumentViewerModal({ file, onClose }) {
     a.remove();
   }, [url, file?.name]);
 
+  const noteText = (file?.description || file?.note || file?.fileDescription || '').trim();
+
   // Fetch text content for .txt/.csv files
   useEffect(() => {
     if (viewerType !== 'text' || !url) return;
-    setTextLoading(true);
-    setTextError(null);
-    fetch(url)
-      .then((res) => {
+    let cancelled = false;
+
+    const loadText = async () => {
+      setTextLoading(true);
+      setTextError(null);
+
+      try {
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`Failed to load (${res.status})`);
-        return res.text();
-      })
-      .then((text) => { setTextContent(text); setTextLoading(false); })
-      .catch((err) => { setTextError(err.message); setTextLoading(false); });
+        const text = await res.text();
+        if (!cancelled) setTextContent(text);
+      } catch (err) {
+        if (!cancelled) setTextError(err.message);
+      } finally {
+        if (!cancelled) setTextLoading(false);
+      }
+    };
+
+    loadText();
+
+    return () => {
+      cancelled = true;
+    };
   }, [viewerType, url]);
 
   // Close on Escape key
@@ -177,6 +193,20 @@ export default function DocumentViewerModal({ file, onClose }) {
               </button>
             </div>
           )}
+        </div>
+
+        <div className="px-6 py-3 border-t border-gray-100 bg-white">
+          <div className="flex items-center gap-2 mb-2">
+            <i className="fas fa-sticky-note text-amber-500 text-xs"></i>
+            <h4 className="text-xs font-semibold text-gray-text uppercase tracking-wider">Description / Note</h4>
+          </div>
+          <div className="rounded-xl border border-gray-100 bg-gray-50 px-3.5 py-2.5 max-h-24 overflow-y-auto">
+            {noteText ? (
+              <p className="text-sm text-dark-text whitespace-pre-wrap break-words leading-relaxed">{noteText}</p>
+            ) : (
+              <p className="text-sm text-gray-400 italic">No note provided.</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

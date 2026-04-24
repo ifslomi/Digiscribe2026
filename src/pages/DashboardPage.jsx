@@ -855,7 +855,9 @@ export default function DashboardPage() {
       url: transcription.transcriptionUrl,
       type: transcription.transcriptionType,
       size: transcription.transcriptionSize,
-      description: transcription.description || '',
+      description: transcription.description || transcription.note || transcription.fileDescription || '',
+      note: transcription.note || '',
+      fileDescription: transcription.fileDescription || '',
       sourceType: 'file',
     });
   }, []);
@@ -1723,7 +1725,7 @@ export default function DashboardPage() {
                                     </div>
                                     <button
                                       type="button"
-                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize })}
+                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize, description: file.description || '', note: file.description || '', fileDescription: file.description || '' })}
                                       className="text-[12px] font-medium text-dark-text truncate max-w-[220px] hover:text-primary transition-colors text-left"
                                       title={file.transcriptionName}
                                     >
@@ -1741,7 +1743,7 @@ export default function DashboardPage() {
                                   <div className="flex items-center justify-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize })}
+                                      onClick={() => setDocViewerFile({ url: file.transcriptionUrl, name: file.transcriptionName || 'Transcription', type: file.transcriptionType, size: file.transcriptionSize, description: file.description || '', note: file.description || '', fileDescription: file.description || '' })}
                                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium text-gray-400 hover:text-primary hover:bg-primary/5 transition-colors"
                                       title="View transcription"
                                     >
@@ -1960,6 +1962,11 @@ export default function DashboardPage() {
                           <h3 className="text-sm font-semibold text-dark-text truncate">
                             {t.title || t.fileName || 'Untitled Transcription'}
                           </h3>
+                          {(t.note || t.fileDescription) && (
+                            <p className="text-[11px] text-gray-text mt-1 line-clamp-2 leading-relaxed" title={t.note || t.fileDescription}>
+                              {t.note || t.fileDescription}
+                            </p>
+                          )}
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
                             {t.fileName && (
                               <span className="text-[11px] text-gray-400 flex items-center gap-1">

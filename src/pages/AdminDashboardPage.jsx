@@ -1465,7 +1465,9 @@ function FilesTab({
       url: transcription.transcriptionUrl,
       type: transcription.transcriptionType,
       size: transcription.transcriptionSize,
-      description: transcription.description || '',
+      description: transcription.description || transcription.note || transcription.fileDescription || '',
+      note: transcription.note || '',
+      fileDescription: transcription.fileDescription || '',
       sourceType: 'file',
     });
   }, []);
@@ -1670,7 +1672,6 @@ function FilesTab({
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allPageIds, selectedCount]);
   const isLoading = filesLoading || foldersLoading;
 

@@ -241,8 +241,11 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
 
   useEffect(() => {
     setDescriptionValue(file.description || '');
+  }, [file.description]);
+
+  useEffect(() => {
     setDescriptionMessage(null);
-  }, [file.id, file.description]);
+  }, [file.id]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
