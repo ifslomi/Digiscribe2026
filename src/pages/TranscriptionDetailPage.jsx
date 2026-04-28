@@ -411,6 +411,7 @@ export default function TranscriptionDetailPage() {
                       </a>
                     </div>
                   )}
+
                 </div>
 
                 {/* Actions */}

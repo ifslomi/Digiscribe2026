@@ -579,6 +579,12 @@ export default function UploadPage() {
   /* ================================================================ */
   /*  UPLOAD LOGIC                                                     */
   /* ================================================================ */
+  const getAuthHeaders = async (forceRefresh = false) => {
+    const token = await getIdToken(forceRefresh);
+    if (!token) throw new Error('Authentication required. Please log in again.');
+    return { Authorization: `Bearer ${token}` };
+  };
+
   const handleUpload = async () => {
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -596,15 +602,10 @@ export default function UploadPage() {
     });
 
     try {
-      const token = await getIdToken();
-      if (!token) throw new Error('Authentication required. Please log in again.');
-
-      const authHeaders = { Authorization: `Bearer ${token}` };
-
       if (uploadMethod === 'file') {
-        await uploadFiles(authHeaders, controller.signal);
+        await uploadFiles(getAuthHeaders, controller.signal);
       } else {
-        await uploadUrls(authHeaders, controller.signal);
+        await uploadUrls(getAuthHeaders, controller.signal);
       }
     } catch (err) {
       if (err.name === 'AbortError' || err.message === '__CANCELLED__') {
@@ -622,7 +623,7 @@ export default function UploadPage() {
     }
   };
 
-  const uploadFiles = async (authHeaders, signal) => {
+  const uploadFiles = async (getHeaders, signal) => {
     const filesToUpload = [...files];
     const totalSize = filesToUpload.reduce((sum, f) => sum + f.size, 0);
     let uploadedBytes = 0;
@@ -653,6 +654,7 @@ export default function UploadPage() {
         formData.append('chunkIndex', String(chunkIndex));
         formData.append('chunkStart', String(start));
 
+        const authHeaders = await getHeaders();
         const chunkRes = await fetch('/api/upload/chunk', {
           method: 'POST',
           headers: authHeaders,
@@ -704,6 +706,7 @@ export default function UploadPage() {
           ? `/api/upload/complete?targetOwnerEmail=${encodeURIComponent(targetOwnerEmail)}`
           : '/api/upload/complete';
 
+        const authHeaders = await getHeaders();
         const completeRes = await fetch(completeUrl, {
           method: 'POST',
           headers: {
@@ -792,7 +795,7 @@ export default function UploadPage() {
     setCurrentStep(5);
   };
 
-  const uploadUrls = async (authHeaders, signal) => {
+  const uploadUrls = async (getHeaders, signal) => {
     const results = [];
     const errors = [];
 
@@ -811,6 +814,7 @@ export default function UploadPage() {
           ? `/api/upload/url?targetOwnerEmail=${encodeURIComponent(targetOwnerEmail)}`
           : '/api/upload/url';
 
+        const authHeaders = await getHeaders();
         const res = await fetch(uploadUrl, {
           method: 'POST',
           headers: {

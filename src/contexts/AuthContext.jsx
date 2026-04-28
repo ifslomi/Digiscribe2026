@@ -76,9 +76,9 @@ export function AuthProvider({ children }) {
     return signOut(auth);
   };
 
-  const getIdToken = async () => {
+  const getIdToken = async (forceRefresh = false) => {
     if (!auth.currentUser) return null;
-    const token = await auth.currentUser.getIdToken();
+    const token = await auth.currentUser.getIdToken(forceRefresh);
     try {
       sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
     } catch {

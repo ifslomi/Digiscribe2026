@@ -213,7 +213,7 @@ function PreviewFailedFallback({ sourceUrl }) {
           rel="noopener noreferrer"
           className="text-primary hover:underline"
         >
-          Watch on original site
+          View on original site
         </a>
       </p>
     </div>
@@ -730,18 +730,6 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
                 {file.serviceCategory}
               </span>
             )}
-            {isUrlUpload && sourceUrl && !showInlineSourceFallback && (
-              <a
-                href={sourceUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[11px] text-gray-400 hover:text-primary transition-colors"
-                title={sourceUrl}
-              >
-                <i className="fas fa-external-link-alt text-[9px]"></i>
-                Source
-              </a>
-            )}
           </div>
           <div className="flex items-center gap-2">
             {mediaType === 'video' && file.url && (
@@ -755,14 +743,27 @@ export default function FilePreviewModal({ file, onClose, canEditDescription = f
                 Open Direct
               </a>
             )}
-            {file.url && (
+            {isUrlUpload && sourceUrl ? (
               <a
-                href={fileDownloadUrl(file.url)}
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-text hover:text-dark-text hover:bg-gray-100 rounded-lg transition-colors"
+                title={sourceUrl}
               >
-                <i className="fas fa-download text-[10px]"></i>
-                Download
+                <i className="fas fa-external-link-alt text-[10px]"></i>
+                Source
               </a>
+            ) : (
+              file.url && (
+                <a
+                  href={fileDownloadUrl(file.url)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-text hover:text-dark-text hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <i className="fas fa-download text-[10px]"></i>
+                  Download
+                </a>
+              )
             )}
           </div>
         </div>
