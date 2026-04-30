@@ -168,7 +168,9 @@ router.get('/', verifyAuth, async (req, res) => {
         }
       }
 
-      const note = data.description || data.note || fileDescription || '';
+      const note = typeof data.note === 'string'
+        ? data.note
+        : (typeof data.description === 'string' ? data.description : '');
 
       return {
         id: doc.id,
@@ -226,7 +228,9 @@ router.get('/:id', verifyAuth, async (req, res) => {
       }
     }
 
-    const note = data.description || data.note || fileDescription || '';
+    const note = typeof data.note === 'string'
+      ? data.note
+      : (typeof data.description === 'string' ? data.description : '');
 
     res.json({
       success: true,
@@ -246,7 +250,7 @@ router.get('/:id', verifyAuth, async (req, res) => {
 
 // PUT /api/transcriptions/:id - Update a transcription
 router.put('/:id', verifyAdmin, async (req, res) => {
-  const { content, title } = req.body;
+  const { content, title, note } = req.body;
 
   try {
     const docRef = adminDb.collection('transcriptions').doc(req.params.id);
@@ -263,6 +267,13 @@ router.put('/:id', verifyAdmin, async (req, res) => {
     };
     if (content !== undefined) updates.content = content;
     if (title !== undefined) updates.title = title;
+    if (Object.prototype.hasOwnProperty.call(req.body, 'note')) {
+      const nextNote = typeof note === 'string' ? note.trim() : '';
+      if (nextNote.length > 2000) {
+        return res.status(400).json({ success: false, error: 'Note must be 2000 characters or less.' });
+      }
+      updates.note = nextNote;
+    }
 
     await docRef.update(updates);
     res.json({ success: true });

@@ -47,7 +47,7 @@ function getFileIcon(type) {
 
 export default function TranscriptionDetailPage() {
   const { fileId } = useParams();
-  const { isAdmin, getIdToken } = useAuth();
+  const { isAdmin } = useAuth();
   const toast = useAppToast();
   const { files, loading: filesLoading, error: filesError } = useFirestoreFiles();
   const {
@@ -116,44 +116,24 @@ export default function TranscriptionDetailPage() {
   }, [existingTranscription]);
 
   useEffect(() => {
-    setNoteValue(file?.description || '');
+    setNoteValue(existingTranscription?.note || '');
     setNoteMessage(null);
-  }, [file?.id, file?.description]);
+  }, [existingTranscription?.id, existingTranscription?.note]);
 
   const handleSaveNote = async () => {
-    if (!fileId) return;
+    if (!existingTranscription?.id) {
+      setNoteMessage({ type: 'error', text: 'Upload or create a transcription before adding a note.' });
+      return;
+    }
 
     const nextNote = noteValue;
     setNoteSaving(true);
     setNoteMessage(null);
 
     try {
-      const token = await getIdToken();
-      const res = await fetch(`/api/files/metadata/${fileId}/description`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ description: nextNote }),
-      });
-
-      const raw = await res.text();
-      let data = {};
-      if (raw) {
-        try {
-          data = JSON.parse(raw);
-        } catch {
-          data = { error: raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() };
-        }
-      }
-
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || `Failed to update note (${res.status}).`);
-      }
-
-      setNoteValue(data.description ?? nextNote);
+      await updateTranscription(existingTranscription.id, { note: nextNote });
       setNoteMessage({ type: 'success', text: 'Note saved.' });
+      await fetchTranscriptions({ fileId });
     } catch (err) {
       setNoteMessage({ type: 'error', text: err.message });
     } finally {
@@ -615,7 +595,7 @@ export default function TranscriptionDetailPage() {
                         <button
                           type="button"
                           onClick={handleSaveNote}
-                          disabled={noteSaving || noteValue.trim() === (file?.description || '').trim()}
+                          disabled={noteSaving || !existingTranscription || noteValue.trim() === (existingTranscription?.note || '').trim()}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium text-white bg-primary hover:bg-primary-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {noteSaving ? (

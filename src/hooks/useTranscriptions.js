@@ -48,15 +48,19 @@ export function useTranscriptions() {
     return data.transcriptionId;
   }, [getIdToken]);
 
-  const updateTranscription = useCallback(async (id, { content, title }) => {
+  const updateTranscription = useCallback(async (id, { content, title, note }) => {
     const token = await getIdToken();
+    const payload = {};
+    if (content !== undefined) payload.content = content;
+    if (title !== undefined) payload.title = title;
+    if (note !== undefined) payload.note = note;
     const res = await fetch(`/api/transcriptions/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ content, title }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (!res.ok || !data.success) {

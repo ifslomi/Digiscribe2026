@@ -839,9 +839,9 @@ export default function DashboardPage() {
       url: transcription.transcriptionUrl,
       type: transcription.transcriptionType,
       size: transcription.transcriptionSize,
-      description: transcription.description || transcription.note || transcription.fileDescription || '',
+      description: transcription.note || '',
       note: transcription.note || '',
-      fileDescription: transcription.fileDescription || '',
+      fileDescription: '',
       sourceType: 'file',
       uploadedByAdmin: true,
     });
@@ -1961,9 +1961,9 @@ export default function DashboardPage() {
                           <h3 className="text-sm font-semibold text-dark-text truncate">
                             {t.title || t.fileName || 'Untitled Transcription'}
                           </h3>
-                          {(t.note || t.fileDescription) && (
-                            <p className="text-[11px] text-gray-text mt-1 line-clamp-2 leading-relaxed" title={t.note || t.fileDescription}>
-                              {t.note || t.fileDescription}
+                          {t.note && (
+                            <p className="text-[11px] text-gray-text mt-1 line-clamp-2 leading-relaxed" title={t.note}>
+                              {t.note}
                             </p>
                           )}
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">

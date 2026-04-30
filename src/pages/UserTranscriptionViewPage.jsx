@@ -105,7 +105,7 @@ export default function UserTranscriptionViewPage() {
   }
 
   const t = transcription;
-  const noteText = (t?.note || t?.fileDescription || '').trim();
+  const noteText = (t?.note || '').trim();
   const isFileDelivery = t?.deliveryType === 'file';
 
   return (

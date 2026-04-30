@@ -1346,9 +1346,9 @@ function FilesTab({
       url: transcription.transcriptionUrl,
       type: transcription.transcriptionType,
       size: transcription.transcriptionSize,
-      description: transcription.description || transcription.note || transcription.fileDescription || '',
+      description: transcription.note || '',
       note: transcription.note || '',
-      fileDescription: transcription.fileDescription || '',
+      fileDescription: '',
       sourceType: 'file',
     });
   }, []);
